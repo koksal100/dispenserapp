@@ -8,8 +8,8 @@ class CircularSelector extends StatefulWidget {
 
   const CircularSelector({
     super.key,
-    required final this.sections,
-    required final this.onUpdate,
+    required this.sections,
+    required this.onUpdate,
   });
 
   @override
@@ -58,7 +58,7 @@ class CircularSelectorState extends State<CircularSelector> {
                     ),
                     style: theme.textTheme.bodyLarge,
                   ),
-                  const SizedBox(width: 20),
+                  const SizedBox(height: 20),
                   Container(
                     decoration: BoxDecoration(
                       color: colorScheme.primary.withOpacity(0.08),
@@ -157,7 +157,7 @@ class CircularSelectorState extends State<CircularSelector> {
     final size = context.size!;
     final center = Offset(size.width / 2, size.height / 2);
     final radius = min(size.width / 2, size.height / 2) * 0.75;
-    const strokeWidth = 50.0;
+    final strokeWidth = 50.0;
 
     final dx = tapPosition.dx - center.dx;
     final dy = tapPosition.dy - center.dy;
@@ -181,7 +181,6 @@ class _CircularSelectorPainter extends CustomPainter {
   final List<Map<String, dynamic>> sections;
   final BuildContext context;
 
-  // KULLANICININ İSTEDİĞİ RENK PALETİ
   final List<Color> _colors = [
     const Color(0xFF56ABE8), // Türk Mavisi (Derin, Canlı Mavi)
     const Color(0xFFE60000),     // Koyu Kırmızı (Vişne Kırmızısı)
@@ -200,43 +199,17 @@ class _CircularSelectorPainter extends CustomPainter {
 
     final center = Offset(size.width / 2, size.height / 2);
     final radius = min(size.width / 2, size.height / 2) * 0.8;
-    const strokeWidth = 65.0;
+    const strokeWidth = 70.0; // Increased stroke width
 
     // Arka plan halkası
     final basePaint = Paint()
-      ..color = Colors.grey.shade200
+      ..color = Colors.grey.shade200 // Lighter background for the ring
       ..style = PaintingStyle.stroke
       ..strokeWidth = strokeWidth;
 
     canvas.drawCircle(center, radius, basePaint);
 
-    if (sections.isEmpty) {
-      final textPainter = TextPainter(
-        text: TextSpan(
-          text: 'İlaç Ekle',
-          style: theme.textTheme.titleMedium?.copyWith(color: colorScheme.primary, fontWeight: FontWeight.bold),
-        ),
-        textAlign: TextAlign.center,
-        textDirection: TextDirection.ltr,
-      )..layout(maxWidth: size.width * 0.5);
-
-      const icon = Icons.add_circle_outline;
-      final iconPainter = TextPainter(
-        text: TextSpan(
-          text: String.fromCharCode(icon.codePoint),
-          style: TextStyle(
-            fontSize: 40,
-            fontFamily: icon.fontFamily,
-            color: Colors.grey.shade400,
-          ),
-        ),
-        textDirection: TextDirection.ltr,
-      )..layout();
-
-      iconPainter.paint(canvas, Offset(center.dx - iconPainter.width / 2, center.dy - iconPainter.height - 5));
-      textPainter.paint(canvas, Offset(center.dx - textPainter.width / 2, center.dy + 5));
-      return;
-    }
+    if (sections.isEmpty) return;
 
     final sectionAngle = 2 * pi / sections.length;
 
@@ -265,8 +238,7 @@ class _CircularSelectorPainter extends CustomPainter {
       final name = sections[i]['name'] as String;
       final timeText = timeOfDay?.format(context) ?? '';
 
-      // Text'in dairenin ortasına oturması için yarıçap hesaplandı
-      final textRadius = radius;
+      final textRadius = radius; 
 
       final textSpan = TextSpan(
         children: [
@@ -275,21 +247,15 @@ class _CircularSelectorPainter extends CustomPainter {
             style: theme.textTheme.titleLarge?.copyWith(
               color: Colors.white,
               fontWeight: FontWeight.bold,
-              // Gölge, metnin arka plan rengiyle kontrastını artırır
-              shadows: [Shadow(color: Colors.black.withOpacity(0.7), blurRadius: 4, offset: const Offset(1, 1))],
+              shadows: [Shadow(color: Colors.black.withOpacity(0.8), blurRadius: 4, offset: const Offset(1, 2))],
             ),
           ),
           TextSpan(
             text: name,
             style: theme.textTheme.bodyLarge?.copyWith(
-              // Fenerbahçe Sarısı (FFCC00) üzerine siyah metin daha iyi kontrast sağlar
-              color: (_colors[i % _colors.length] == const Color(0xFFFFCC00))
-                  ? Colors.black
-                  : Colors.white.withOpacity(0.9),
+              color: Colors.white.withOpacity(0.9),
               fontWeight: FontWeight.w600,
-              shadows: (_colors[i % _colors.length] == const Color(0xFFFFCC00))
-                  ? [Shadow(color: Colors.grey.withOpacity(0.5), blurRadius: 2, offset: const Offset(0.5, 0.5))]
-                  : [Shadow(color: Colors.black.withOpacity(0.6), blurRadius: 3, offset: const Offset(1, 1))],
+              shadows: [Shadow(color: Colors.black.withOpacity(0.7), blurRadius: 4, offset: const Offset(1, 2))],
             ),
           ),
         ],
@@ -308,7 +274,7 @@ class _CircularSelectorPainter extends CustomPainter {
     }
 
     // Merkez ikon
-    const centerIcon = Icons.medication_liquid_rounded;
+    final centerIcon = Icons.medication_liquid_rounded;
     final iconPainter = TextPainter(
       text: TextSpan(
         text: String.fromCharCode(centerIcon.codePoint),
