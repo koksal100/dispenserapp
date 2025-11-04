@@ -2,12 +2,12 @@ import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'firebase_options.dart';
-import 'home_screen.dart';
+import 'main_hub.dart'; // Import the new main hub
 
 // Tema tanımı
 ThemeData get appTheme {
   final colorScheme = ColorScheme.fromSeed(
-    seedColor: Color(0xFF71DDFF),
+    seedColor: Color(0xFFFF98F9),
     brightness: Brightness.light,
   );
 
@@ -65,7 +65,7 @@ class MyApp extends StatelessWidget {
     return MaterialApp(
       title: 'İlaç Hatırlatıcı',
       theme: appTheme, // Tanımlanan temayı kullan
-      home: const HomeScreen(),
+      home: const MainHub(), // Start with MainHub instead of HomeScreen
       debugShowCheckedModeBanner: false,
     );
   }

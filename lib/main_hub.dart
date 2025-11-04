@@ -1,0 +1,63 @@
+import 'package:flutter/material.dart';
+import 'home_screen.dart';
+import 'sync_screen.dart';
+import 'relatives_screen.dart';
+
+class MainHub extends StatefulWidget {
+  const MainHub({super.key});
+
+  @override
+  State<MainHub> createState() => _MainHubState();
+}
+
+class _MainHubState extends State<MainHub> {
+  int _selectedIndex = 0;
+
+  static const List<Widget> _widgetOptions = <Widget>[
+    HomeScreen(),
+    SyncScreen(),
+    RelativesScreen(),
+  ];
+
+  void _onItemTapped(int index) {
+    setState(() {
+      _selectedIndex = index;
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('💊 İlaç Takip'),
+      ),
+      body: Center(
+        child: _widgetOptions.elementAt(_selectedIndex),
+      ),
+      bottomNavigationBar: BottomNavigationBar(
+        items: const <BottomNavigationBarItem>[
+          BottomNavigationBarItem(
+            icon: Icon(Icons.home_rounded),
+            label: 'Ana Sayfa',
+          ),
+          BottomNavigationBarItem(
+            icon: Icon(Icons.sync_rounded),
+            label: 'Senkronizasyon',
+          ),
+          BottomNavigationBarItem(
+            icon: Icon(Icons.people_alt_rounded),
+            label: 'Yakınlarım',
+          ),
+        ],
+        currentIndex: _selectedIndex,
+        selectedItemColor: colorScheme.primary,
+        unselectedItemColor: Colors.grey,
+        onTap: _onItemTapped,
+        showUnselectedLabels: true,
+      ),
+    );
+  }
+}
