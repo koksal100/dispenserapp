@@ -33,48 +33,50 @@ class _HomeScreenState extends State<HomeScreen> {
     if (uid != null) {
       setState(() {
         _userUid = uid;
-        _isLoading = false;
       });
-      _loadSections();
-    } else {
-      setState(() {
-        _isLoading = false;
-      });
-    }
+      await _loadSections();
+    } 
+    setState(() {
+      _isLoading = false;
+    });
   }
 
   Future<void> _loadSections() async {
     if (_userUid == null) return;
 
     final prefs = await SharedPreferences.getInstance();
-    final String? sectionsString = prefs.getString('sections_$_userUid'); // User-specific key
+    final String? sectionsString = prefs.getString('sections_$_userUid');
 
     if (sectionsString != null) {
       final List<dynamic> decoded = json.decode(sectionsString);
       if (decoded.isNotEmpty && decoded.length == 6) {
-        setState(() {
-          _sections = decoded.map((item) {
+        _sections = decoded.asMap().entries.map((entry) {
+            final int index = entry.key;
+            final Map<String, dynamic> item = entry.value;
+            final bool isActive = item['hour'] != -1;
+            
+            final TimeOfDay time = isActive
+                ? TimeOfDay(hour: item['hour'], minute: item['minute'])
+                : TimeOfDay(hour: (8 + 2 * index) % 24, minute: 0); // Default time for inactive
+
             return {
               'name': item['name'],
-              'time': TimeOfDay(hour: item['hour'], minute: item['minute']),
-              'isActive': item['isActive'] ?? false,
+              'time': time,
+              'isActive': isActive,
             };
-          }).toList();
-        });
+        }).toList();
         return;
       }
     }
 
-    setState(() {
-      _sections = List.generate(6, (index) {
-        return {
-          'name': 'Bölme ${index + 1}',
-          'time': TimeOfDay(hour: (8 + 2 * index) % 24, minute: 0),
-          'isActive': true,
-        };
-      });
+    _sections = List.generate(6, (index) {
+      return {
+        'name': 'Bölme ${index + 1}',
+        'time': TimeOfDay(hour: (8 + 2 * index) % 24, minute: 0),
+        'isActive': false, 
+      };
     });
-    _saveSections();
+    await _saveSections();
   }
 
   Future<void> _saveSections() async {
@@ -83,11 +85,12 @@ class _HomeScreenState extends State<HomeScreen> {
     final prefs = await SharedPreferences.getInstance();
     final List<Map<String, dynamic>> serializableList = _sections.map((section) {
       final time = section['time'] as TimeOfDay;
+      final bool isActive = section['isActive'] ?? false;
+      
       return {
         'name': section['name'],
-        'hour': time.hour,
-        'minute': time.minute,
-        'isActive': section['isActive'] ?? false,
+        'hour': isActive ? time.hour : -1,
+        'minute': isActive ? time.minute : 0,
       };
     }).toList();
     
@@ -98,51 +101,18 @@ class _HomeScreenState extends State<HomeScreen> {
   void _updateSection(int index, Map<String, dynamic> data) {
     setState(() {
       _sections[index].addAll(data);
+      _sections[index]['isActive'] = true;
     });
     _saveSections();
   }
 
-  void _deleteSection(int index) {
+  void _deactivateSection(int index) {
     setState(() {
-      _sections[index] = {
-        'name': 'Bölme ${index + 1}',
-        'time': TimeOfDay(hour: (8 + 2 * index) % 24, minute: 0),
-        'isActive': false,
-      };
+      _sections[index]['isActive'] = false;
     });
     _saveSections();
   }
 
-  Future<void> _showDeleteConfirmationDialog(int index) async {
-    return showDialog<void>(
-      context: context,
-      builder: (BuildContext context) {
-        return AlertDialog(
-          title: const Text('İlaç Bölmesini Boşalt'),
-          content: const Text('Bu ilaç bölmesini boşaltmak istediğinizden emin misiniz?'),
-          actions: <Widget>[
-            TextButton(
-              child: const Text('İptal'),
-              onPressed: () {
-                Navigator.of(context).pop();
-              },
-            ),
-            ElevatedButton(
-              onPressed: () {
-                _deleteSection(index);
-                Navigator.of(context).pop();
-              },
-              style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.redAccent,
-                foregroundColor: Colors.white,
-              ),
-              child: const Text('Boşalt'),
-            ),
-          ],
-        );
-      },
-    );
-  }
 
   @override
   Widget build(BuildContext context) {
@@ -212,10 +182,12 @@ class _HomeScreenState extends State<HomeScreen> {
                       int index = entry.key;
                       Map<String, dynamic> section = entry.value;
                       TimeOfDay time = section['time'] as TimeOfDay;
+                      bool isActive = section['isActive'] ?? false;
+                      
                       return Card(
                         margin: const EdgeInsets.symmetric(vertical: 7),
                         child: ListTile(
-                          contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                          contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                           leading: CircleAvatar(
                             backgroundColor: colorScheme.primary.withOpacity(0.1),
                             child: Icon(Icons.medication_liquid_rounded, color: colorScheme.primary, size: 28),
@@ -225,14 +197,14 @@ class _HomeScreenState extends State<HomeScreen> {
                             style: theme.textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold, fontSize: 19),
                           ),
                           subtitle: Text(
-                            'Saat: ${time.format(context)}',
-                            style: theme.textTheme.bodyMedium?.copyWith(color: colorScheme.onSurfaceVariant),
+                            isActive ? 'Saat: ${time.format(context)}' : 'Pasif',
+                            style: theme.textTheme.bodyMedium?.copyWith(color: isActive ? colorScheme.onSurfaceVariant : Colors.grey),
                           ),
                           trailing: Row(
                             mainAxisSize: MainAxisSize.min,
                             children: [
                               Switch(
-                                value: section['isActive'] ?? false,
+                                value: isActive,
                                 onChanged: (bool value) {
                                   setState(() {
                                     _sections[index]['isActive'] = value;
@@ -241,25 +213,12 @@ class _HomeScreenState extends State<HomeScreen> {
                                 },
                                 activeColor: colorScheme.primary,
                               ),
-                              PopupMenuButton<String>(
-                                onSelected: (value) {
-                                  if (value == 'edit') {
-                                    _circularSelectorKey.currentState?.showEditDialog(index);
-                                  } else if (value == 'delete') {
-                                    _showDeleteConfirmationDialog(index);
-                                  }
+                              IconButton(
+                                icon: const Icon(Icons.edit_outlined),
+                                tooltip: 'Düzenle',
+                                onPressed: () {
+                                  _circularSelectorKey.currentState?.showEditDialog(index);
                                 },
-                                itemBuilder: (BuildContext context) => <PopupMenuEntry<String>>[
-                                  const PopupMenuItem<String>(
-                                    value: 'edit',
-                                    child: ListTile(leading: Icon(Icons.edit_outlined), title: Text('Düzenle')),
-                                  ),
-                                  const PopupMenuItem<String>(
-                                    value: 'delete',
-                                    child: ListTile(leading: Icon(Icons.delete_outline), title: Text('Bölmeyi Boşalt')),
-                                  ),
-                                ],
-                                icon: const Icon(Icons.more_vert_rounded),
                               ),
                             ],
                           ),
