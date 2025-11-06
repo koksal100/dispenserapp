@@ -70,7 +70,7 @@ class _HomeScreenState extends State<HomeScreen> {
         return {
           'name': 'Bölme ${index + 1}',
           'time': TimeOfDay(hour: (8 + 2 * index) % 24, minute: 0),
-          'isActive': false,
+          'isActive': true,
         };
       });
     });
