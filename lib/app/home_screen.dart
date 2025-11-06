@@ -53,7 +53,7 @@ class _HomeScreenState extends State<HomeScreen> {
         _sections = decoded.asMap().entries.map((entry) {
             final int index = entry.key;
             final Map<String, dynamic> item = entry.value;
-            final bool isActive = item['hour'] != -1;
+            final bool isActive = item['isActive'];
             
             final TimeOfDay time = isActive
                 ? TimeOfDay(hour: item['hour'], minute: item['minute'])
@@ -73,7 +73,7 @@ class _HomeScreenState extends State<HomeScreen> {
       return {
         'name': 'Bölme ${index + 1}',
         'time': TimeOfDay(hour: (8 + 2 * index) % 24, minute: 0),
-        'isActive': false, 
+        'isActive': true,
       };
     });
     await _saveSections();
@@ -89,11 +89,12 @@ class _HomeScreenState extends State<HomeScreen> {
       
       return {
         'name': section['name'],
-        'hour': isActive ? time.hour : -1,
-        'minute': isActive ? time.minute : 0,
+        'hour':  time.hour,
+        'minute': time.minute,
+        'isActive': isActive,
       };
     }).toList();
-    
+
     await prefs.setString('sections_$_userUid', json.encode(serializableList));
     await _databaseService.saveSections(_userUid!, serializableList);
   }
@@ -106,12 +107,7 @@ class _HomeScreenState extends State<HomeScreen> {
     _saveSections();
   }
 
-  void _deactivateSection(int index) {
-    setState(() {
-      _sections[index]['isActive'] = false;
-    });
-    _saveSections();
-  }
+
 
 
   @override
@@ -207,6 +203,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                 value: isActive,
                                 onChanged: (bool value) {
                                   setState(() {
+                                    print("tercih değiştirildi $value");
                                     _sections[index]['isActive'] = value;
                                   });
                                   _saveSections();
