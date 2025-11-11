@@ -1,6 +1,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../services/auth_service.dart';
 import '../services/database_service.dart';
@@ -14,51 +15,48 @@ class DeviceListScreen extends StatefulWidget {
 }
 
 class _DeviceListScreenState extends State<DeviceListScreen> {
-  late Future<String?> _initFuture;
+  late Future<String?> _initAndPrecacheFuture;
   final AuthService _authService = AuthService();
   final DatabaseService _dbService = DatabaseService();
-
-  // 1. Durum değişkeni eklendi: Görselin yüklenip yüklenmediğini tutar
-  bool _isImagePrecached = false;
+  bool _isInitialized = false;
 
   @override
   void initState() {
     super.initState();
-    _initFuture = _authService.getOrCreateUser();
   }
 
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-
-    // Yalnızca bir kere görsel önbelleğe alma işlemi yapılmasını sağlıyoruz
-    if (!_isImagePrecached) {
-      // 2. precacheImage'ın Future sonucunu bekliyoruz
-      final image = const AssetImage('assets/dispenser_icon.png');
-      precacheImage(image, context).then((_) {
-        // Görsel başarılı bir şekilde önbelleğe alındığında durumu güncelliyoruz
-        if (mounted) {
-          setState(() {
-            _isImagePrecached = true;
-          });
-        }
-      }).catchError((error) {
-        // Hata durumunda da devam etme kararı alabiliriz, burada sadece logladık
-        debugPrint("Görsel yükleme hatası: $error");
-        if (mounted) {
-          setState(() {
-            _isImagePrecached = true; // Hata olsa bile ilerlemek isteyebiliriz
-          });
-        }
-      });
+    if (!_isInitialized) {
+      _isInitialized = true;
+      _initAndPrecacheFuture = _initialize();
     }
+  }
+
+  Future<String?> _initialize() async {
+    final prefs = await SharedPreferences.getInstance();
+    String? uid = prefs.getString('uid');
+
+    if (uid == null) {
+      final results = await Future.wait([
+        _authService.getOrCreateUser(),
+        precacheImage(const AssetImage('assets/dispenser_icon.png'), context),
+      ]);
+      uid = results[0] as String?;
+      if (uid != null) {
+        await prefs.setString('uid', uid);
+      }
+    } else {
+      await precacheImage(const AssetImage('assets/dispenser_icon.png'), context);
+    }
+
+    return uid;
   }
 
   void _retryLogin() {
     setState(() {
-      _initFuture = _authService.getOrCreateUser();
-      // Tekrar denemede görseli de tekrar yüklemeyi tetikleyebiliriz
-      _isImagePrecached = false;
+      _initAndPrecacheFuture = _initialize();
     });
   }
 
@@ -97,21 +95,8 @@ class _DeviceListScreenState extends State<DeviceListScreen> {
 
   @override
   Widget build(BuildContext context) {
-    // 3. Görsel yüklenmediyse önce CircularProgressIndicator gösteriyoruz
-    if (!_isImagePrecached) {
-      return const Scaffold(
-        body: Center(
-          child: CircularProgressIndicator(
-            // Estetik bir renk ekleyebilirsiniz
-            color: Colors.deepPurple,
-          ),
-        ),
-      );
-    }
-
-    // Görsel yüklendikten sonra mevcut FutureBuilder mantığı devam ediyor
     return FutureBuilder<String?>(
-      future: _initFuture,
+      future: _initAndPrecacheFuture,
       builder: (context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting) {
           return const Center(child: CircularProgressIndicator());
@@ -141,9 +126,7 @@ class _DeviceListScreenState extends State<DeviceListScreen> {
       stream: FirebaseFirestore.instance.collection('users').doc(uid).snapshots(),
       builder: (context, userSnapshot) {
         if (!userSnapshot.hasData || !userSnapshot.data!.exists) {
-          return CircularProgressIndicator(
-            color: Colors.deepPurple,
-          );
+          return CircularProgressIndicator();
         }
 
         final userData = userSnapshot.data!.data() as Map<String, dynamic>;
@@ -157,7 +140,7 @@ class _DeviceListScreenState extends State<DeviceListScreen> {
         }
 
         return ListView.builder(
-          padding: const EdgeInsets.only(top: 20.0),
+          padding: const EdgeInsets.only(top: 20.0), // Üst boşluğu biraz artırdık
           itemCount: ownedDispensers.length,
           itemBuilder: (context, index) {
             final macAddress = ownedDispensers[index] as String;
@@ -171,56 +154,61 @@ class _DeviceListScreenState extends State<DeviceListScreen> {
                 final deviceData = deviceSnapshot.data!.data() as Map<String, dynamic>;
                 final deviceName = deviceData['device_name'] as String? ?? "Akıllı İlaç Kutusu";
 
-                return Card(
-                  margin: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
-                  elevation: 9,
-                  shadowColor: Colors.black38,
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(36)),
-                  child: InkWell(
-                    onTap: () {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(builder: (context) => HomeScreen(macAddress: macAddress)),
-                      );
-                    },
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(vertical: 20, horizontal: 16),
-                      child: Row(
-                        children: [
-                          ClipRRect(
-                            borderRadius: BorderRadius.circular(8.0),
-                            child: Image.asset(
-                              'assets/dispenser_icon.png',
-                              width: 110,
-                              height: 120,
-                              fit: BoxFit.cover,
+                return SizedBox(
+                  height: 185,
+                  width: double.infinity,
+                  child: Card(
+                    margin: const EdgeInsets.symmetric(vertical: 12, horizontal: 16), // Dikey boşluğu artırdık
+                    elevation: 9,
+                    shadowColor: Colors.black38,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(36)), // Daha yuvarlak köşeler
+                    child: InkWell(
+                      onTap: () {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(builder: (context) => HomeScreen(macAddress: macAddress)),
+                        );
+                      },
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 20, horizontal: 16),
+                        child: Row(
+                          children: [
+                            ClipRRect(
+                              borderRadius: BorderRadius.circular(8.0),
+                              child: Image.asset(
+                                'assets/dispenser_icon.png',
+                                width: 110,
+                                height: 120,
+                                fit: BoxFit.cover,
+                              ),
                             ),
-                          ),
-                          const SizedBox(width: 16),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  deviceName,
-                                  style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold),
-                                ),
-                                Padding(
-                                  padding: const EdgeInsets.only(top: 8.0),
-                                  child: Text(
-                                    'MAC Adresi: $macAddress',
-                                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: Colors.grey.shade600),
+                            const SizedBox(width: 16),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: [
+                                  Text(
+                                    deviceName,
+                                    style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold),
                                   ),
-                                ),
-                              ],
+                                  Padding(
+                                    padding: const EdgeInsets.only(top: 8.0),
+                                    child: Text(
+                                      'MAC Adresi: $macAddress',
+                                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: Colors.grey.shade600),
+                                    ),
+                                  ),
+                                ],
+                              ),
                             ),
-                          ),
-                          IconButton(
-                            icon: const Icon(Icons.edit_outlined, size: 30, color: Colors.black),
-                            tooltip: 'Cihaz adını düzenle',
-                            onPressed: () => _showEditNameDialog(macAddress, deviceName),
-                          ),
-                        ],
+                            IconButton(
+                              icon: const Icon(Icons.edit_outlined, size: 30, color: Colors.black),
+                              tooltip: 'Cihaz adını düzenle',
+                              onPressed: () => _showEditNameDialog(macAddress, deviceName),
+                            ),
+                          ],
+                        ),
                       ),
                     ),
                   ),
