@@ -14,7 +14,7 @@ class DeviceListScreen extends StatefulWidget {
 }
 
 class _DeviceListScreenState extends State<DeviceListScreen> {
-  late Future<String?> _initAndPrecacheFuture;
+  late Future<AppUser?> _initAndPrecacheFuture;
   final AuthService _authService = AuthService();
   final DatabaseService _dbService = DatabaseService();
   bool _isInitialized = false;
@@ -33,12 +33,12 @@ class _DeviceListScreenState extends State<DeviceListScreen> {
     }
   }
 
-  Future<String?> _initialize() async {
+  Future<AppUser?> _initialize() async {
     final results = await Future.wait([
       _authService.getOrCreateUser(),
       precacheImage(const AssetImage('assets/dispenser_icon.png'), context),
     ]);
-    return results[0] as String?;
+    return results[0] as AppUser?;
   }
 
   void _retryLogin() {
@@ -82,7 +82,7 @@ class _DeviceListScreenState extends State<DeviceListScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return FutureBuilder<String?>(
+    return FutureBuilder<AppUser?>(
       future: _initAndPrecacheFuture,
       builder: (context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting) {
@@ -102,8 +102,8 @@ class _DeviceListScreenState extends State<DeviceListScreen> {
           );
         }
 
-        final uid = snapshot.data!;
-        return _buildDeviceList(uid);
+        final userData = snapshot.data!;
+        return _buildDeviceList(userData.uid);
       },
     );
   }

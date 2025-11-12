@@ -4,16 +4,24 @@ import 'package:google_sign_in/google_sign_in.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 
+class AppUser {
+  final String uid;
+  final String? displayName;
+
+  AppUser({required this.uid, this.displayName});
+}
+
 class AuthService {
   final FirebaseAuth _auth = FirebaseAuth.instance;
   final GoogleSignIn _googleSignIn = GoogleSignIn();
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
   final DatabaseService _dbService = DatabaseService(); // Database service instance
 
-  Future<String?> getOrCreateUser() async {
+  Future<AppUser?> getOrCreateUser() async {
     final prefs = await SharedPreferences.getInstance();
     String? uid = prefs.getString('user_uid');
     String? email;
+    String? displayName;
 
     if (uid == null) {
       try {
@@ -30,6 +38,7 @@ class AuthService {
         final UserCredential userCredential = await _auth.signInWithCredential(credential);
         uid = userCredential.user?.uid;
         email = userCredential.user?.email;
+        displayName = userCredential.user?.displayName;
 
         if (uid != null) {
           await prefs.setString('user_uid', uid);
@@ -38,7 +47,7 @@ class AuthService {
             'createdAt': FieldValue.serverTimestamp(),
             'lastLogin': FieldValue.serverTimestamp(),
             'email': email,
-            'displayName': userCredential.user?.displayName,
+            'displayName': displayName,
             'photoURL': userCredential.user?.photoURL,
           }, SetOptions(merge: true));
         }
@@ -52,6 +61,7 @@ class AuthService {
         final userDoc = await _firestore.collection('users').doc(uid).get();
         if (userDoc.exists) {
           email = userDoc.data()!['email'] as String?;
+          displayName = userDoc.data()!['displayName'] as String?;
         }
         // Update last login time
         await _firestore.collection('users').doc(uid).update({
@@ -67,7 +77,10 @@ class AuthService {
       await _dbService.updateUserDeviceList(uid, email);
     }
 
-    return uid;
+    if (uid != null) {
+      return AppUser(uid: uid, displayName: displayName);
+    }
+    return null;
   }
 
   Future<void> signOut() async {

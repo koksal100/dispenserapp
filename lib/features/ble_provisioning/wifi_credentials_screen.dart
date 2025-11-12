@@ -57,9 +57,9 @@ class _WifiCredentialsScreenState extends State<WifiCredentialsScreen> {
       await ssidCharacteristic.write(utf8.encode(_ssidController.text));
       await passwordCharacteristic.write(utf8.encode(_passwordController.text));
 
-      final uid = await _authService.getOrCreateUser();
-      if (uid != null) {
-        await uidCharacteristic.write(utf8.encode(uid));
+      final AppUser = await _authService.getOrCreateUser();
+      if (AppUser != null) {
+        await uidCharacteristic.write(utf8.encode(AppUser.uid));
       }
 
       // Listen for status updates
