@@ -10,12 +10,12 @@ plugins {
 
 android {
     namespace = "com.example.dispenserapp"
-    compileSdk = flutter.compileSdkVersion
+    compileSdk = 34 // Increased compileSdkVersion
     ndkVersion = flutter.ndkVersion
 
     compileOptions {
-        sourceCompatibility = JavaVersion.VERSION_11
-        targetCompatibility = JavaVersion.VERSION_11
+        sourceCompatibility = JavaVersion.VERSION_11 // Changed to 1.8
+        targetCompatibility = JavaVersion.VERSION_11 // Changed to 1.8
     }
 
     kotlinOptions {

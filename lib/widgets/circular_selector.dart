@@ -230,7 +230,6 @@ class _CircularSelectorPainter extends CustomPainter {
         paint,
       );
 
-      // Yazılar
       final textAngle = startAngle + sweepAngle / 2;
       final timeOfDay = sections[i]['time'] as TimeOfDay?;
       final name = sections[i]['name'] as String;

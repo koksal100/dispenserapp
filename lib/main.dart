@@ -1,3 +1,4 @@
+import 'package:dispenserapp/services/notification_service.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -7,7 +8,7 @@ import 'app/main_hub.dart'; // Import the new main hub
 // Tema tanımı
 ThemeData get appTheme {
   final colorScheme = ColorScheme.fromSeed(
-    seedColor: Color(0xFFFF98F9),
+    seedColor: const Color(0xFFFF98F9),
     brightness: Brightness.light,
   );
 
@@ -54,6 +55,8 @@ void main() async {
   await Firebase.initializeApp(
     options: DefaultFirebaseOptions.currentPlatform,
   );
+  await NotificationService.initializeNotifications();
+  await NotificationService.requestPermission();
   runApp(const MyApp());
 }
 

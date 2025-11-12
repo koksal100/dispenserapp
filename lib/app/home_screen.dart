@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:dispenserapp/features/ble_provisioning/sync_screen.dart';
+import 'package:dispenserapp/services/notification_service.dart';
 import 'package:flutter/material.dart';
 import 'package:dispenserapp/widgets/circular_selector.dart';
 import 'package:dispenserapp/services/database_service.dart';
@@ -17,7 +18,8 @@ class HomeScreen extends StatefulWidget {
 class _HomeScreenState extends State<HomeScreen> {
   final GlobalKey<CircularSelectorState> _circularSelectorKey = GlobalKey<CircularSelectorState>();
   final DatabaseService _databaseService = DatabaseService();
-  
+  final NotificationService _notificationService = NotificationService();
+
   List<Map<String, dynamic>> _sections = [];
   bool _isLoading = true;
 
@@ -28,15 +30,12 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _loadSections() async {
-    // Start loading
     setState(() {
       _isLoading = true;
     });
 
     try {
       final doc = await FirebaseFirestore.instance.collection('dispenser').doc(widget.macAddress).get();
-
-      // After await, check if the widget is still in the tree.
       if (!mounted) return;
 
       if (doc.exists && doc.data()!.containsKey('section_config')) {
@@ -68,11 +67,12 @@ class _HomeScreenState extends State<HomeScreen> {
       print("Error loading sections: $e");
     }
 
-    // Check if mounted again before the final setState.
     if (!mounted) return;
     setState(() {
       _isLoading = false;
     });
+    // Schedule notifications on initial load
+    _notificationService.scheduleMedicationNotifications(_sections);
   }
 
   Future<void> _saveSectionConfig() async {
@@ -87,6 +87,8 @@ class _HomeScreenState extends State<HomeScreen> {
     }).toList();
 
     await _databaseService.saveSectionConfig(widget.macAddress, serializableList);
+    // Reschedule notifications after saving
+    await _notificationService.scheduleMedicationNotifications(_sections);
   }
 
   void _updateSection(int index, Map<String, dynamic> data) {
@@ -94,8 +96,81 @@ class _HomeScreenState extends State<HomeScreen> {
       _sections[index].addAll(data);
       _sections[index]['isActive'] = true;
     });
-    _saveSectionConfig();
+    _saveSectionConfig(); // This will also trigger rescheduling notifications
   }
+  
+  Future<void> _showNotificationSettingsDialog() async {
+    final settings = await _notificationService.getNotificationSettings();
+    bool notificationsEnabled = settings['enabled'];
+    int offset = settings['offset'];
+
+    await showDialog(
+      context: context,
+      builder: (context) {
+        return StatefulBuilder(
+          builder: (context, setStateInDialog) {
+            return AlertDialog(
+              title: const Text('Alarm Ayarları'),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  SwitchListTile(
+                    title: const Text('Alarmları Aktif Et'),
+                    value: notificationsEnabled,
+                    onChanged: (value) {
+                      setStateInDialog(() {
+                        notificationsEnabled = value;
+                      });
+                    },
+                  ),
+                  const SizedBox(height: 16),
+                  const Text('İlaç saatinden ne kadar önce haber verilsin?'),
+                  DropdownButton<int>(
+                    value: offset,
+                    items: [0, 5, 10, 15, 30].map<DropdownMenuItem<int>>((int value) {
+                      return DropdownMenuItem<int>(
+                        value: value,
+                        child: Text(value == 0 ? 'Tam zamanında' : '$value dakika önce'),
+                      );
+                    }).toList(),
+                    onChanged: notificationsEnabled
+                        ? (int? newValue) {
+                            setStateInDialog(() {
+                              offset = newValue!;
+                            });
+                          }
+                        : null, // Disable if notifications are off
+                  ),
+                ],
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.of(context).pop(),
+                  child: const Text('İptal'),
+                ),
+                ElevatedButton(
+                  onPressed: () async {
+                    await _notificationService.saveNotificationSettings(
+                      enabled: notificationsEnabled,
+                      offset: offset,
+                    );
+                    // Reschedule notifications with new settings
+                    await _notificationService.scheduleMedicationNotifications(_sections);
+                    Navigator.of(context).pop();
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('Alarm ayarları kaydedildi.')),
+                    );
+                  },
+                  child: const Text('Kaydet'),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+  }
+
 
   @override
   Widget build(BuildContext context) {
@@ -105,6 +180,13 @@ class _HomeScreenState extends State<HomeScreen> {
     return Scaffold(
       appBar: AppBar(
         title: const Text('Cihaz Ayarları'),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.alarm_add_rounded),
+            tooltip: 'Alarm Ayarları',
+            onPressed: _showNotificationSettingsDialog,
+          ),
+        ],
       ),
       body: _isLoading
           ? const Center(child: CircularProgressIndicator())
