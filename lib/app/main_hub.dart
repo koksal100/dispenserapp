@@ -50,8 +50,8 @@ class _MainHubState extends State<MainHub> {
     final bool? shouldSignOut = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Emin misiniz?'),
-        content: const Text('Çıkış yapmak istediğinize emin misiniz?'),
+        title: const Text('Emin misiniz?',textAlign: TextAlign.center),
+        content: const Text('Farklı bir google hesabıyla girmek istediğinize emin misiniz?',textAlign: TextAlign.center),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(context).pop(false),

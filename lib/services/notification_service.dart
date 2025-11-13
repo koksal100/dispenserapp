@@ -8,7 +8,7 @@ class NotificationService {
 
   static Future<void> initializeNotifications() async {
     await AwesomeNotifications().initialize(
-      null, // Varsayılan uygulama ikonunu kullan
+      'resource://drawable/res_notification_icon', // Özel bildirim ikonu
       [
         NotificationChannel(
           channelGroupKey: 'scheduled_channel_group',

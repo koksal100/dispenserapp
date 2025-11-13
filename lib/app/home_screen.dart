@@ -182,7 +182,7 @@ class _HomeScreenState extends State<HomeScreen> {
         title: const Text('Cihaz Ayarları'),
         actions: [
           IconButton(
-            icon: const Icon(Icons.alarm_add_rounded),
+            icon: const Icon(Icons.alarm_add_rounded,size: 50,),
             tooltip: 'Alarm Ayarları',
             onPressed: _showNotificationSettingsDialog,
           ),

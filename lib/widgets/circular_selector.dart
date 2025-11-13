@@ -185,7 +185,7 @@ class _CircularSelectorPainter extends CustomPainter {
     const Color(0xFF56ABE8),
     const Color(0xFFFF5A6D),
     const Color(0xFFFFC245),
-    const Color(0xFFEF86FF),
+    const Color(0xFFEE63FF),
   ];
 
   _CircularSelectorPainter(this.sections, this.context);
@@ -201,7 +201,7 @@ class _CircularSelectorPainter extends CustomPainter {
 
     // Arka plan halkası
     final basePaint = Paint()
-      ..color = Colors.grey.shade200 // Lighter background for the ring
+      ..color = Colors.black // Lighter background for the ring
       ..style = PaintingStyle.stroke
       ..strokeWidth = strokeWidth;
 
