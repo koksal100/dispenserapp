@@ -7,15 +7,16 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 class AppUser {
   final String uid;
   final String? displayName;
+  final String email;
 
-  AppUser({required this.uid, this.displayName});
+  AppUser({required this.uid, this.displayName, required this.email});
 }
 
 class AuthService {
   final FirebaseAuth _auth = FirebaseAuth.instance;
   final GoogleSignIn _googleSignIn = GoogleSignIn();
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
-  final DatabaseService _dbService = DatabaseService(); // Database service instance
+  final DatabaseService _dbService = DatabaseService();
 
   Future<AppUser?> getOrCreateUser() async {
     final prefs = await SharedPreferences.getInstance();
@@ -25,60 +26,56 @@ class AuthService {
 
     if (uid == null) {
       try {
-        // Sign in with Google for new user
         final GoogleSignInAccount? googleUser = await _googleSignIn.signIn();
-        if (googleUser == null) {
-          return null; // User canceled sign-in
-        }
+        if (googleUser == null) return null;
+
         final GoogleSignInAuthentication googleAuth = await googleUser.authentication;
         final AuthCredential credential = GoogleAuthProvider.credential(
           accessToken: googleAuth.accessToken,
           idToken: googleAuth.idToken,
         );
         final UserCredential userCredential = await _auth.signInWithCredential(credential);
+
         uid = userCredential.user?.uid;
-        email = userCredential.user?.email;
+        // KRİTİK DÜZELTME: Email'i her zaman küçük harfe çeviriyoruz
+        email = userCredential.user?.email?.toLowerCase();
         displayName = userCredential.user?.displayName;
 
-        if (uid != null) {
+        if (uid != null && email != null) {
           await prefs.setString('user_uid', uid);
-          // Save new user info to Firestore
+
           await _firestore.collection('users').doc(uid).set({
             'createdAt': FieldValue.serverTimestamp(),
             'lastLogin': FieldValue.serverTimestamp(),
-            'email': email,
+            'email': email, // Veritabanına da küçük harfle kaydediyoruz
             'displayName': displayName,
             'photoURL': userCredential.user?.photoURL,
           }, SetOptions(merge: true));
         }
       } catch (e) {
-        print('Error with Google sign-in: $e');
+        print('Google giriş hatası: $e');
         return null;
       }
     } else {
-      // For existing user, get email from Firestore
       try {
         final userDoc = await _firestore.collection('users').doc(uid).get();
         if (userDoc.exists) {
-          email = userDoc.data()!['email'] as String?;
+          // Veritabanından gelen veriyi de garantiye alalım
+          email = (userDoc.data()!['email'] as String?)?.toLowerCase();
           displayName = userDoc.data()!['displayName'] as String?;
         }
-        // Update last login time
         await _firestore.collection('users').doc(uid).update({
           'lastLogin': FieldValue.serverTimestamp(),
         });
       } catch (e) {
-        print('Error fetching user email or updating login: $e');
+        print('Kullanıcı bilgisi çekme hatası: $e');
       }
     }
 
-    // After login/creation, update the user's list of owned devices
     if (uid != null && email != null) {
+      // Listeleri senkronize et
       await _dbService.updateUserDeviceList(uid, email);
-    }
-
-    if (uid != null) {
-      return AppUser(uid: uid, displayName: displayName);
+      return AppUser(uid: uid, displayName: displayName, email: email);
     }
     return null;
   }

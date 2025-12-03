@@ -10,7 +10,7 @@ plugins {
 
 android {
     namespace = "com.example.dispenserapp"
-    compileSdk = 35 // Increased compileSdkVersion
+    compileSdk = 36
     ndkVersion = flutter.ndkVersion
 
     compileOptions {
