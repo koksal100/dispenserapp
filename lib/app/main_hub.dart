@@ -3,9 +3,11 @@ import 'package:dispenserapp/features/ble_provisioning/sync_screen.dart';
 import 'package:dispenserapp/app/relatives_screen.dart';
 import 'package:dispenserapp/services/auth_service.dart';
 import 'package:dispenserapp/services/database_service.dart';
+import 'package:easy_localization/easy_localization.dart'; // Çeviri paketi
 import 'package:flutter/material.dart';
 
 import 'device_list_screen.dart';
+import 'settings_screen.dart'; // Ayarlar sayfası
 
 class MainHub extends StatefulWidget {
   const MainHub({super.key});
@@ -50,9 +52,9 @@ class _MainHubState extends State<MainHub> {
     });
     if (value) {
       ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text("Düzenleme modu açıldı. Cihazları sürükleyebilirsiniz."),
-            duration: Duration(seconds: 1),
+          SnackBar(
+            content: Text("drag_info".tr()), // Çeviri: "Düzenlemek için sürükleyin..."
+            duration: const Duration(seconds: 2),
           )
       );
     }
@@ -64,7 +66,10 @@ class _MainHubState extends State<MainHub> {
     setState(() {
       _currentUser = newUser;
     });
-    Navigator.of(context).pop();
+    // Menü açıksa kapat
+    if (mounted && Navigator.canPop(context)) {
+      Navigator.of(context).pop();
+    }
   }
 
   void _showProfileMenu() {
@@ -78,6 +83,7 @@ class _MainHubState extends State<MainHub> {
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
+                // Profil Fotoğrafı
                 CircleAvatar(
                   radius: 40,
                   backgroundColor: Theme.of(context).colorScheme.primary,
@@ -94,19 +100,39 @@ class _MainHubState extends State<MainHub> {
                       : null,
                 ),
                 const SizedBox(height: 16),
-                const Text("Logged as", style: TextStyle(fontSize: 12, color: Colors.grey)),
+
+                // "Oturum Açıldı" metni
+                Text("logged_in_as".tr(), style: const TextStyle(fontSize: 12, color: Colors.grey)),
+
                 Text(
                   _currentUser?.displayName ?? "Kullanıcı",
                   style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
                   textAlign: TextAlign.center,
                 ),
                 const SizedBox(height: 24),
+
+                // --- AYARLAR MENÜSÜ ---
+                ListTile(
+                  leading: const Icon(Icons.settings),
+                  title: Text("settings_title".tr()), // "Ayarlar"
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  onTap: () {
+                    Navigator.pop(context); // Menüyü kapat
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(builder: (context) => const SettingsScreen()),
+                    );
+                  },
+                ),
+                const Divider(),
+
+                // --- ÇIKIŞ BUTONU ---
                 SizedBox(
                   width: double.infinity,
                   child: ElevatedButton.icon(
                     onPressed: _signOut,
                     icon: const Icon(Icons.logout),
-                    label: const Text("Çıkış Yap"),
+                    label: Text("logout".tr()), // "Çıkış Yap"
                     style: ElevatedButton.styleFrom(
                       backgroundColor: Theme.of(context).colorScheme.errorContainer,
                       foregroundColor: Theme.of(context).colorScheme.onErrorContainer,
@@ -126,14 +152,17 @@ class _MainHubState extends State<MainHub> {
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text("Yeni Oda Oluştur"),
+        title: Text("create_room".tr()), // "Yeni Oda Oluştur"
         content: TextField(
           controller: controller,
-          decoration: const InputDecoration(hintText: "Örn: 102 Nolu Oda"),
+          decoration: InputDecoration(hintText: "room_name_hint".tr()), // "Örn: 102 Nolu Oda"
           autofocus: true,
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text("İptal")),
+          TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: Text("cancel".tr()) // "İptal"
+          ),
           ElevatedButton(
             onPressed: () {
               if (controller.text.isNotEmpty && _currentUser != null) {
@@ -141,7 +170,7 @@ class _MainHubState extends State<MainHub> {
               }
               Navigator.pop(context);
             },
-            child: const Text("Oluştur"),
+            child: Text("create".tr()), // "Oluştur"
           )
         ],
       ),
@@ -171,46 +200,79 @@ class _MainHubState extends State<MainHub> {
         backgroundColor: theme.scaffoldBackgroundColor,
         foregroundColor: colorScheme.onSurface,
         centerTitle: true,
-        leading: IconButton(
-          icon: const Icon(Icons.settings, size: 28),
-          onPressed: _showProfileMenu,
+
+        // --- SOL ÜST: PROFİL FOTOĞRAFI ---
+        leading: Padding(
+          padding: const EdgeInsets.all(8.0),
+          child: InkWell(
+            onTap: _showProfileMenu,
+            borderRadius: BorderRadius.circular(50),
+            child: CircleAvatar(
+              backgroundColor: colorScheme.primary,
+              backgroundImage: _currentUser?.photoURL != null
+                  ? NetworkImage(_currentUser!.photoURL!)
+                  : null,
+              child: _currentUser?.photoURL == null
+                  ? Text(
+                _currentUser?.displayName != null
+                    ? _currentUser!.displayName![0].toUpperCase()
+                    : "U",
+                style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.white),
+              )
+                  : null,
+            ),
+          ),
         ),
+
+        // --- BAŞLIK (Dinamik Çeviri) ---
         title: Text(
           _selectedIndex == 0
-              ? (_isDragMode ? 'Düzenleme Modu' : 'Cihazlarım')
-              : (_selectedIndex == 1 ? 'Senkronizasyon' : 'Yakınlarım'),
+              ? (_isDragMode ? 'edit_mode'.tr() : 'my_devices'.tr())
+              : (_selectedIndex == 1 ? 'sync'.tr() : 'relatives'.tr()),
           style: theme.textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold),
         ),
+
         actions: [
           if (_selectedIndex == 0)
             IconButton(
-              // --- DEĞİŞİKLİK BURADA YAPILDI ---
               icon: Icon(
-                _isDragMode ? Icons.close : Icons.menu, // Drag modu açıksa Çarpı (Close), kapalıysa Menü (3 çizgi)
+                _isDragMode ? Icons.close : Icons.menu,
                 size: 30,
-                color: _isDragMode ? colorScheme.error : colorScheme.onSurface, // Açıkken kırmızımsı, kapalıyken normal renk
+                color: _isDragMode ? colorScheme.error : colorScheme.onSurface,
               ),
-              tooltip: _isDragMode ? 'Düzenlemeyi Bitir' : 'Düzenle / Taşı',
+              tooltip: _isDragMode ? 'edit_mode'.tr() : 'edit_mode'.tr(), // Tooltip de çevrilebilir
               onPressed: () => _toggleDragMode(!_isDragMode),
             ),
           const SizedBox(width: 8),
         ],
       ),
+
       body: currentScreen,
+
       floatingActionButton: (_selectedIndex == 0 && _isDragMode)
           ? FloatingActionButton.extended(
         onPressed: _showCreateFolderDialog,
         icon: const Icon(Icons.create_new_folder),
-        label: const Text("Oda Ekle"),
+        label: Text("add_room".tr()), // "Oda Ekle"
         backgroundColor: colorScheme.primary,
         foregroundColor: colorScheme.onPrimary,
       )
           : null,
+
       bottomNavigationBar: BottomNavigationBar(
-        items: const <BottomNavigationBarItem>[
-          BottomNavigationBarItem(icon: Icon(Icons.devices_other_rounded), label: 'Cihazlarım'),
-          BottomNavigationBarItem(icon: Icon(Icons.sync_rounded), label: 'Senkronizasyon'),
-          BottomNavigationBarItem(icon: Icon(Icons.people_alt_rounded), label: 'Yakınlarım'),
+        items: <BottomNavigationBarItem>[
+          BottomNavigationBarItem(
+              icon: const Icon(Icons.devices_other_rounded),
+              label: 'my_devices'.tr() // "Cihazlarım"
+          ),
+          BottomNavigationBarItem(
+              icon: const Icon(Icons.sync_rounded),
+              label: 'sync'.tr() // "Senkronizasyon"
+          ),
+          BottomNavigationBarItem(
+              icon: const Icon(Icons.people_alt_rounded),
+              label: 'relatives'.tr() // "Yakınlarım"
+          ),
         ],
         currentIndex: _selectedIndex,
         selectedItemColor: colorScheme.primary,

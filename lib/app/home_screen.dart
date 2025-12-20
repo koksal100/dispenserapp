@@ -1,9 +1,10 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:dispenserapp/services/auth_service.dart';
 import 'package:dispenserapp/services/notification_service.dart';
+import 'package:easy_localization/easy_localization.dart'; // EKLENDİ
 import 'package:flutter/material.dart';
 import 'package:dispenserapp/widgets/circular_selector.dart';
-import 'package:dispenserapp/services/database_service.dart'; // DeviceRole buradan geliyor
+import 'package:dispenserapp/services/database_service.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 
 class HomeScreen extends StatefulWidget {
@@ -25,7 +26,6 @@ class _HomeScreenState extends State<HomeScreen> {
   bool _isLoading = true;
   bool _isRinging = false;
 
-  // Varsayılan rol
   DeviceRole _currentRole = DeviceRole.readOnly;
   String? _currentUserEmail;
 
@@ -41,8 +41,6 @@ class _HomeScreenState extends State<HomeScreen> {
     final user = await _authService.getOrCreateUser();
     if (user != null) {
       _currentUserEmail = user.email;
-
-      // Rolü veritabanından çek
       _currentRole = await _databaseService.getUserRole(widget.macAddress, user.email);
     }
 
@@ -74,11 +72,10 @@ class _HomeScreenState extends State<HomeScreen> {
           };
         }).toList();
       } else {
-        // Veri yoksa varsayılan olarak 3 bölme oluştur
         _sections = List.generate(3, (index) {
           return {
-            'name': 'İlaç ${index + 1}', // "Bölme" yerine "İlaç" daha samimi olabilir
-            'time': TimeOfDay(hour: (8 + 4 * index) % 24, minute: 0), // Saatleri biraz daha aralıklı yaydık
+            'name': 'medicine_default_name'.tr(args: [(index + 1).toString()]), // "İlaç 1", "İlaç 2"
+            'time': TimeOfDay(hour: (8 + 4 * index) % 24, minute: 0),
             'isActive': true,
           };
         });
@@ -87,10 +84,7 @@ class _HomeScreenState extends State<HomeScreen> {
           await _saveSectionConfig();
         }
       }
-
-      // Local bildirimleri planla
       _notificationService.scheduleMedicationNotifications(_sections);
-
     } catch (e) {
       print("Error loading sections: $e");
     }
@@ -125,16 +119,14 @@ class _HomeScreenState extends State<HomeScreen> {
     });
     _saveSectionConfig();
   }
+
   Future<void> _handleBuzzer() async {
     setState(() {
       _isRinging = !_isRinging;
     });
 
-    // DatabaseService'e eklediğiniz fonksiyonu çağırıyoruz
-    // Eğer 2. parametre true ise öttür, false ise sustur.
     await _databaseService.toggleBuzzer(widget.macAddress, _isRinging);
 
-    // Eğer ötmeye başladıysa, 3 saniye sonra otomatik durdurma mantığı (Opsiyonel ama önerilir)
     if (_isRinging) {
       Future.delayed(const Duration(seconds: 3), () async {
         if (mounted && _isRinging) {
@@ -153,16 +145,15 @@ class _HomeScreenState extends State<HomeScreen> {
 
   void _showReadOnlyWarning() {
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('Sadece İzleyici modundasınız. Değişiklik yapmak için cihaz sahibinden yetki isteyin.'),
+      SnackBar(
+        content: Text("read_only_warning".tr()), // "Sadece İzleyici modundasınız..."
         backgroundColor: Colors.orange,
-        duration: Duration(seconds: 2),
+        duration: const Duration(seconds: 2),
       ),
     );
   }
 
-
-  // --- KULLANICI YÖNETİMİ DİYALOGU (GÜNCELLENMİŞ) ---
+  // --- KULLANICI YÖNETİMİ DİYALOGU ---
   void _showUserManagementDialog() {
     final TextEditingController emailController = TextEditingController();
 
@@ -179,23 +170,22 @@ class _HomeScreenState extends State<HomeScreen> {
             final secondaryUsers = List<String>.from(data['secondary_mails'] ?? []);
 
             return AlertDialog(
-              title: const Text('Erişim Yönetimi'),
+              title: Text("access_management_title".tr()), // "Erişim Yönetimi"
               content: SizedBox(
                 width: double.maxFinite,
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    // Ekleme Kısmı
                     Row(
                       children: [
                         Expanded(
                           child: TextField(
                             controller: emailController,
-                            decoration: const InputDecoration(
-                              hintText: 'Kullanıcı maili...',
-                              labelText: 'Yetki Ver',
-                              border: OutlineInputBorder(),
-                              contentPadding: EdgeInsets.symmetric(horizontal: 10, vertical: 0),
+                            decoration: InputDecoration(
+                              hintText: "user_email_hint".tr(), // "Kullanıcı maili..."
+                              labelText: "grant_access".tr(), // "Yetki Ver"
+                              border: const OutlineInputBorder(),
+                              contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 0),
                             ),
                           ),
                         ),
@@ -203,7 +193,7 @@ class _HomeScreenState extends State<HomeScreen> {
                         IconButton(
                           style: IconButton.styleFrom(backgroundColor: Colors.green.shade50),
                           icon: const Icon(Icons.person_add, color: Colors.green),
-                          tooltip: 'Ekle',
+                          tooltip: "add".tr(), // "Ekle"
                           onPressed: () {
                             final mail = emailController.text.trim();
                             if (mail.isNotEmpty) {
@@ -217,26 +207,26 @@ class _HomeScreenState extends State<HomeScreen> {
                     const SizedBox(height: 16),
                     const Divider(),
 
-                    const Padding(
-                      padding: EdgeInsets.symmetric(vertical: 8.0),
+                    Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 8.0),
                       child: Align(
                         alignment: Alignment.centerLeft,
-                        child: Text("Kullanıcı Listesi", style: TextStyle(fontWeight: FontWeight.bold, color: Colors.grey)),
+                        child: Text("user_list_title".tr(), // "Kullanıcı Listesi"
+                            style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.grey)),
                       ),
                     ),
 
-                    // Kullanıcı Listesi
                     Flexible(
                       child: ListView(
                         shrinkWrap: true,
                         children: [
                           if (readOnlyUsers.isEmpty && secondaryUsers.isEmpty)
-                            const Padding(
-                              padding: EdgeInsets.all(8.0),
-                              child: Text("Henüz başka kullanıcı yok.", style: TextStyle(fontStyle: FontStyle.italic)),
+                            Padding(
+                              padding: const EdgeInsets.all(8.0),
+                              child: Text("no_users_yet".tr(), // "Henüz başka kullanıcı yok."
+                                  style: const TextStyle(fontStyle: FontStyle.italic)),
                             ),
 
-                          // 1. İzleyiciler (Yönetici Yap butonu var)
                           ...readOnlyUsers.map((email) => Card(
                             margin: const EdgeInsets.symmetric(vertical: 4),
                             child: ListTile(
@@ -244,20 +234,20 @@ class _HomeScreenState extends State<HomeScreen> {
                               contentPadding: const EdgeInsets.symmetric(horizontal: 8),
                               leading: const Icon(Icons.remove_red_eye, color: Colors.grey),
                               title: Text(email, style: const TextStyle(fontSize: 13)),
-                              subtitle: const Text("İzleyici"),
+                              subtitle: Text("viewer".tr()), // "İzleyici"
                               trailing: Row(
                                 mainAxisSize: MainAxisSize.min,
                                 children: [
                                   IconButton(
                                     icon: const Icon(Icons.arrow_upward_rounded, color: Colors.green),
-                                    tooltip: 'Yönetici Yap',
+                                    tooltip: "promote_admin".tr(), // "Yönetici Yap"
                                     onPressed: () async {
                                       await _databaseService.promoteToSecondary(widget.macAddress, email);
                                     },
                                   ),
                                   IconButton(
                                     icon: const Icon(Icons.delete_outline, color: Colors.red),
-                                    tooltip: 'Sil',
+                                    tooltip: "delete".tr(), // "Sil"
                                     onPressed: () async {
                                       await _databaseService.removeUser(widget.macAddress, email);
                                     },
@@ -267,7 +257,6 @@ class _HomeScreenState extends State<HomeScreen> {
                             ),
                           )),
 
-                          // 2. Yöneticiler (İzleyici Yap butonu EKLENDİ)
                           ...secondaryUsers.map((email) => Card(
                             margin: const EdgeInsets.symmetric(vertical: 4),
                             color: Colors.blue.shade50,
@@ -276,21 +265,20 @@ class _HomeScreenState extends State<HomeScreen> {
                               contentPadding: const EdgeInsets.symmetric(horizontal: 8),
                               leading: const Icon(Icons.verified_user, color: Colors.blue),
                               title: Text(email, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold)),
-                              subtitle: const Text("Yönetici"),
+                              subtitle: Text("admin".tr()), // "Yönetici"
                               trailing: Row(
                                 mainAxisSize: MainAxisSize.min,
                                 children: [
-                                  // --- YENİ EKLENEN BUTON: AŞAĞI OK ---
                                   IconButton(
                                     icon: const Icon(Icons.arrow_downward_rounded, color: Colors.orange),
-                                    tooltip: 'İzleyici Yap (Rütbe Düşür)',
+                                    tooltip: "demote_viewer".tr(), // "İzleyici Yap"
                                     onPressed: () async {
                                       await _databaseService.demoteToReadOnly(widget.macAddress, email);
                                     },
                                   ),
                                   IconButton(
                                     icon: const Icon(Icons.delete_outline, color: Colors.red),
-                                    tooltip: 'Sil',
+                                    tooltip: "delete".tr(),
                                     onPressed: () async {
                                       await _databaseService.removeUser(widget.macAddress, email);
                                     },
@@ -308,7 +296,7 @@ class _HomeScreenState extends State<HomeScreen> {
               actions: [
                 TextButton(
                   onPressed: () => Navigator.of(context).pop(),
-                  child: const Text('Kapat'),
+                  child: Text("close".tr()), // "Kapat"
                 ),
               ],
             );
@@ -330,20 +318,20 @@ class _HomeScreenState extends State<HomeScreen> {
         return StatefulBuilder(
           builder: (context, setStateInDialog) {
             return AlertDialog(
-              title: const Text('Alarm Ayarları'),
+              title: Text("alarm_settings_title".tr()), // "Alarm Ayarları"
               content: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   if (!_canEdit())
-                    const Padding(
-                      padding: EdgeInsets.only(bottom: 12.0),
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 12.0),
                       child: Text(
-                        "Not: Bu ayarlar sadece sizin telefonunuzu etkiler. Cihaz saatlerini değiştiremezsiniz.",
-                        style: TextStyle(fontSize: 12, color: Colors.orange, fontStyle: FontStyle.italic),
+                        "alarm_settings_note".tr(), // "Not: Bu ayarlar sadece..."
+                        style: const TextStyle(fontSize: 12, color: Colors.orange, fontStyle: FontStyle.italic),
                       ),
                     ),
                   SwitchListTile(
-                    title: const Text('Alarmları Aktif Et'),
+                    title: Text("enable_alarms".tr()), // "Alarmları Aktif Et"
                     value: notificationsEnabled,
                     onChanged: (value) {
                       setStateInDialog(() {
@@ -352,13 +340,15 @@ class _HomeScreenState extends State<HomeScreen> {
                     },
                   ),
                   const SizedBox(height: 16),
-                  const Text('İlaç saatinden ne kadar önce haber verilsin?'),
+                  Text("alarm_offset_label".tr()), // "Ne kadar önce haber verilsin?"
                   DropdownButton<int>(
                     value: offset,
                     items: [0, 5, 10, 15, 30].map<DropdownMenuItem<int>>((int value) {
                       return DropdownMenuItem<int>(
                         value: value,
-                        child: Text(value == 0 ? 'Tam zamanında' : '$value dakika önce'),
+                        child: Text(value == 0
+                            ? "exact_time".tr() // "Tam zamanında"
+                            : "minutes_before".tr(args: [value.toString()])), // "{value} dakika önce"
                       );
                     }).toList(),
                     onChanged: notificationsEnabled
@@ -374,7 +364,7 @@ class _HomeScreenState extends State<HomeScreen> {
               actions: [
                 TextButton(
                   onPressed: () => Navigator.of(context).pop(),
-                  child: const Text('İptal'),
+                  child: Text("cancel".tr()),
                 ),
                 ElevatedButton(
                   onPressed: () async {
@@ -385,10 +375,10 @@ class _HomeScreenState extends State<HomeScreen> {
                     await _notificationService.scheduleMedicationNotifications(_sections);
                     if (mounted) Navigator.of(context).pop();
                     ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text('Alarm ayarları kaydedildi.')),
+                      SnackBar(content: Text("alarm_settings_saved".tr())), // "Alarm ayarları kaydedildi."
                     );
                   },
-                  child: const Text('Kaydet'),
+                  child: Text("save".tr()),
                 ),
               ],
             );
@@ -406,18 +396,17 @@ class _HomeScreenState extends State<HomeScreen> {
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Cihaz Ayarları'),
+        title: Text("device_settings_title".tr()), // "Cihaz Ayarları"
         actions: [
-          // Sadece Owner görebilir
           if (_currentRole == DeviceRole.owner)
             IconButton(
               icon: const Icon(Icons.manage_accounts_rounded),
-              tooltip: 'Erişim Yönetimi',
+              tooltip: "access_management_title".tr(),
               onPressed: _showUserManagementDialog,
             ),
           IconButton(
             icon: const Icon(Icons.alarm_add_rounded, size: 30),
-            tooltip: 'Alarm Ayarları',
+            tooltip: "alarm_settings_title".tr(),
             onPressed: _showNotificationSettingsDialog,
           ),
           const SizedBox(width: 8),
@@ -447,7 +436,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       const SizedBox(width: 12),
                       Expanded(
                         child: Text(
-                          "İzleyici Modu: İlaç saatlerini sadece cihaz sahibi değiştirebilir. Siz sadece bildirim alabilirsiniz.",
+                          "read_only_banner".tr(), // "İzleyici Modu: İlaç saatlerini..."
                           style: theme.textTheme.bodySmall?.copyWith(
                               color: Colors.orange.shade900,
                               fontWeight: FontWeight.w600
@@ -457,7 +446,6 @@ class _HomeScreenState extends State<HomeScreen> {
                     ],
                   ),
                 )
-
               else
                 Card(
                   color: colorScheme.primaryContainer.withOpacity(0.6),
@@ -470,7 +458,7 @@ class _HomeScreenState extends State<HomeScreen> {
                         const SizedBox(width: 15),
                         Expanded(
                           child: Text(
-                            'İlaç saatlerinizi dairesel seçiciden veya listeden kolayca ayarlayın.',
+                            "home_hint_text".tr(), // "İlaç saatlerinizi dairesel..."
                             style: theme.textTheme.bodyLarge?.copyWith(color: colorScheme.onPrimaryContainer, fontWeight: FontWeight.w500),
                           ),
                         ),
@@ -506,13 +494,13 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
 
               const SizedBox(height: 30),
-              // Sadece yetkili kişiler (Owner/Secondary) buzzerı çaldırabilsin
+
               if (!isReadOnly)
                 Padding(
                   padding: const EdgeInsets.only(bottom: 20.0),
                   child: Center(
                     child: SizedBox(
-                      width: 200, // Buton genişliği
+                      width: 220,
                       height: 50,
                       child: ElevatedButton.icon(
                         onPressed: _handleBuzzer,
@@ -526,17 +514,18 @@ class _HomeScreenState extends State<HomeScreen> {
                         ),
                         icon: Icon(_isRinging ? Icons.stop_circle_outlined : Icons.wifi_tethering),
                         label: Text(
-                          _isRinging ? "Sesi Durdur" : "Cihazı Bul / Öttür",
+                          _isRinging ? "stop_sound".tr() : "find_device".tr(), // "Sesi Durdur" / "Cihazı Bul"
                           style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
                         ),
                       ),
                     ),
                   ),
                 ),
+
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 8.0),
                 child: Text(
-                  'Planlanmış İlaçlar',
+                  "scheduled_meds_title".tr(), // "Planlanmış İlaçlar"
                   style: theme.textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.bold),
                 ),
               ),
@@ -565,17 +554,26 @@ class _HomeScreenState extends State<HomeScreen> {
                       style: theme.textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold, fontSize: 19),
                     ),
                     subtitle: Text(
-                      isActive ? 'Saat: ${time.format(context)}' : 'Pasif',
+                      isActive ? "${"time_prefix".tr()}: ${time.format(context)}" : "passive".tr(), // "Saat: ..." veya "Pasif"
                       style: theme.textTheme.bodyMedium?.copyWith(color: isActive ? colorScheme.onSurfaceVariant : Colors.grey),
                     ),
                     trailing: isReadOnly
-                        ? const Tooltip(
-                      message: "Değiştirme yetkiniz yok",
-                      child: Icon(Icons.lock, color: Colors.grey),
+                        ? Tooltip(
+                      message: "no_permission".tr(), // "Değiştirme yetkiniz yok"
+                      child: const Icon(Icons.lock, color: Colors.grey),
                     )
                         : Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
+                        // --- DÜZENLEME (YER DEĞİŞTİRİLDİ) ---
+                        IconButton(
+                          icon: const Icon(Icons.edit_outlined),
+                          tooltip: "edit".tr(), // "Düzenle" (Varsa eklenebilir)
+                          onPressed: () {
+                            _circularSelectorKey.currentState?.showEditDialog(index);
+                          },
+                        ),
+                        // --- SWITCH (EN SAĞA ALINDI) ---
                         Switch(
                           value: isActive,
                           onChanged: (bool value) {
@@ -585,13 +583,6 @@ class _HomeScreenState extends State<HomeScreen> {
                             _saveSectionConfig();
                           },
                           activeColor: colorScheme.primary,
-                        ),
-                        IconButton(
-                          icon: const Icon(Icons.edit_outlined),
-                          tooltip: 'Düzenle',
-                          onPressed: () {
-                            _circularSelectorKey.currentState?.showEditDialog(index);
-                          },
                         ),
                       ],
                     ),

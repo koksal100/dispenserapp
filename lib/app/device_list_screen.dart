@@ -1,4 +1,5 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -59,44 +60,54 @@ class _DeviceListScreenState extends State<DeviceListScreen> {
     final controller = TextEditingController();
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Manuel Cihaz Ekle'),
-        content: TextField(
-          controller: controller,
-          keyboardType: TextInputType.visiblePassword,
-          inputFormatters: [
-            FilteringTextInputFormatter.allow(RegExp(r'[a-fA-F0-9]')),
-            MacAddressInputFormatter(),
-            LengthLimitingTextInputFormatter(17),
-          ],
-          decoration: const InputDecoration(
-            labelText: 'MAC Adresi',
-            hintText: 'AA:BB:CC:11:22:33',
-            border: OutlineInputBorder(),
+      builder: (context) =>
+          AlertDialog(
+            title: Text("manual_add_title").tr(),
+            content: TextField(
+              controller: controller,
+              keyboardType: TextInputType.visiblePassword,
+              inputFormatters: [
+                FilteringTextInputFormatter.allow(RegExp(r'[a-fA-F0-9]')),
+                MacAddressInputFormatter(),
+                LengthLimitingTextInputFormatter(17),
+              ],
+              decoration: InputDecoration(
+                labelText: "mac_address".tr(),
+                hintText: 'AA:BB:CC:11:22:33',
+                border: const OutlineInputBorder(),
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: Text("cancel".tr()),
+              ),
+              ElevatedButton(
+                onPressed: () async {
+                  final mac = controller.text.trim();
+                  if (mac.length == 17) {
+                    if (userEmail.isEmpty) return;
+                    final result = await _dbService.addDeviceManually(
+                        uid, userEmail, mac);
+                    if (!mounted) return;
+                    Navigator.pop(context);
+                    if (result == 'success') {
+                      await _dbService.updateUserDeviceList(uid, userEmail);
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(content: Text("device_added_success".tr())),
+                      );
+                    } else {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(
+                            content: Text(result), backgroundColor: Colors.red),
+                      );
+                    }
+                  }
+                },
+                child: Text("add".tr()),
+              ),
+            ],
           ),
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text('İptal')),
-          ElevatedButton(
-            onPressed: () async {
-              final mac = controller.text.trim();
-              if (mac.length == 17) {
-                if (userEmail.isEmpty) return;
-                final result = await _dbService.addDeviceManually(uid, userEmail, mac);
-                if (!mounted) return;
-                Navigator.pop(context);
-                if (result == 'success') {
-                  await _dbService.updateUserDeviceList(uid, userEmail);
-                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Cihaz başarıyla eklendi!')));
-                } else {
-                  ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(result), backgroundColor: Colors.red));
-                }
-              }
-            },
-            child: const Text('Ekle'),
-          ),
-        ],
-      ),
     );
   }
 
@@ -104,20 +115,25 @@ class _DeviceListScreenState extends State<DeviceListScreen> {
     final controller = TextEditingController(text: currentName);
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
-        title: const Text("Cihaz Adını Düzenle"),
-        content: TextField(controller: controller, autofocus: true),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text("İptal")),
-          ElevatedButton(
-            onPressed: () {
-              if (controller.text.isNotEmpty) _dbService.updateDeviceName(macAddress, controller.text.trim());
-              Navigator.pop(context);
-            },
-            child: const Text("Kaydet"),
+      builder: (context) =>
+          AlertDialog(
+            title: Text("edit_device_name".tr()),
+            content: TextField(controller: controller, autofocus: true),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: Text("cancel".tr()),
+              ),
+              ElevatedButton(
+                onPressed: () {
+                  if (controller.text.isNotEmpty) _dbService.updateDeviceName(
+                      macAddress, controller.text.trim());
+                  Navigator.pop(context);
+                },
+                child: Text("save".tr()),
+              ),
+            ],
           ),
-        ],
-      ),
     );
   }
 
@@ -125,58 +141,79 @@ class _DeviceListScreenState extends State<DeviceListScreen> {
     final controller = TextEditingController(text: currentName);
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
-        title: const Text("Oda İsmini Düzenle"),
-        content: TextField(controller: controller, autofocus: true),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text("İptal")),
-          ElevatedButton(
-            onPressed: () {
-              if (controller.text.isNotEmpty) _dbService.renameGroup(uid, groupId, controller.text.trim());
-              Navigator.pop(context);
-            },
-            child: const Text("Kaydet"),
-          )
-        ],
-      ),
+      builder: (context) =>
+          AlertDialog(
+            title: Text("edit_room_name".tr()),
+            content: TextField(controller: controller, autofocus: true),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: Text("cancel".tr()),
+              ),
+              ElevatedButton(
+                onPressed: () {
+                  if (controller.text.isNotEmpty) _dbService.renameGroup(
+                      uid, groupId, controller.text.trim());
+                  Navigator.pop(context);
+                },
+                child: Text("save".tr()),
+              )
+            ],
+          ),
     );
   }
 
   void _showDeleteConfirmDialog(String uid, String groupId) {
     showDialog(
       context: context,
-      builder: (c) => AlertDialog(
-        title: const Text("Odayı Sil"),
-        content: const Text("Bu odayı silmek istediğinize emin misiniz? Cihazlar silinmez, ana listeye döner."),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(c), child: const Text("İptal")),
-          TextButton(onPressed: () {
-            _dbService.deleteGroup(uid, groupId);
-            Navigator.pop(c);
-          }, child: const Text("Sil", style: TextStyle(color: Colors.red))),
-        ],
-      ),
+      builder: (c) =>
+          AlertDialog(
+            title: Text("delete_room_title".tr()),
+            content: Text("delete_room_desc".tr()),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(c),
+                child: Text("cancel".tr()),
+              ),
+              TextButton(
+                onPressed: () {
+                  _dbService.deleteGroup(uid, groupId);
+                  Navigator.pop(c);
+                },
+                child: Text(
+                  "delete".tr(),
+                  style: const TextStyle(color: Colors.red),
+                ),
+              ),
+            ],
+          ),
     );
   }
 
-  // YENİ: Cihazı listeden gizleme onayı
   void _showHideDeviceDialog(String uid, String deviceId) {
     showDialog(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text("Cihazı Gizle"),
-        content: const Text("Bu cihaz listenizden kaldırılacak ancak yetkileriniz saklı kalacaktır. Tekrar eklemek için '+' butonunu kullanabilirsiniz."),
-        actions: [
-          TextButton(child: const Text("İptal"), onPressed: () => Navigator.pop(ctx)),
-          TextButton(
-            child: const Text("Kaldır", style: TextStyle(color: Colors.red)),
-            onPressed: () {
-              _dbService.hideDevice(uid, deviceId);
-              Navigator.pop(ctx);
-            },
+      builder: (ctx) =>
+          AlertDialog(
+            title: Text("hide_device_title".tr()),
+            content: Text("hide_device_desc".tr()),
+            actions: [
+              TextButton(
+                child: Text("cancel".tr()),
+                onPressed: () => Navigator.pop(ctx),
+              ),
+              TextButton(
+                child: Text(
+                  "remove".tr(),
+                  style: const TextStyle(color: Colors.red),
+                ),
+                onPressed: () {
+                  _dbService.hideDevice(uid, deviceId);
+                  Navigator.pop(ctx);
+                },
+              ),
+            ],
           ),
-        ],
-      ),
     );
   }
 
@@ -185,15 +222,19 @@ class _DeviceListScreenState extends State<DeviceListScreen> {
     return FutureBuilder<AppUser?>(
       future: _initAndPrecacheFuture,
       builder: (context, snapshot) {
-        if (snapshot.connectionState == ConnectionState.waiting) return const Center(child: CircularProgressIndicator());
+        if (snapshot.connectionState == ConnectionState.waiting)
+          return const Center(child: CircularProgressIndicator());
         if (snapshot.hasError || snapshot.data == null) {
           return Center(
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                const Text("Giriş başarısız oldu."),
+                Text("login_failed".tr()),
                 const SizedBox(height: 16),
-                ElevatedButton(onPressed: _retryLogin, child: const Text("Tekrar Dene")),
+                ElevatedButton(
+                  onPressed: _retryLogin,
+                  child: Text("retry".tr()),
+                ),
               ],
             ),
           );
@@ -205,10 +246,14 @@ class _DeviceListScreenState extends State<DeviceListScreen> {
           body: _buildDeviceList(userData.uid),
           floatingActionButton: !widget.isDragMode
               ? FloatingActionButton(
-            onPressed: () => _showAddDeviceDialog(userData.uid, userData.email ?? ''),
-            backgroundColor: Theme.of(context).colorScheme.primary,
+            onPressed: () =>
+                _showAddDeviceDialog(userData.uid, userData.email ?? ''),
+            backgroundColor: Theme
+                .of(context)
+                .colorScheme
+                .secondary, // Turkuaz Vurgu
             child: const Icon(Icons.add, color: Colors.white),
-            tooltip: 'Manuel Cihaz Ekle',
+            tooltip: "manual_add_title".tr(),
           )
               : null,
         );
@@ -218,48 +263,69 @@ class _DeviceListScreenState extends State<DeviceListScreen> {
 
   Widget _buildDeviceList(String uid) {
     return StreamBuilder<DocumentSnapshot>(
-      stream: FirebaseFirestore.instance.collection('users').doc(uid).snapshots(),
+      stream: FirebaseFirestore.instance
+          .collection('users')
+          .doc(uid)
+          .snapshots(),
       builder: (context, userSnapshot) {
-        if (!userSnapshot.hasData || !userSnapshot.data!.exists) return const CircularProgressIndicator();
+        if (!userSnapshot.hasData || !userSnapshot.data!.exists)
+          return const CircularProgressIndicator();
 
         final userData = userSnapshot.data!.data() as Map<String, dynamic>;
 
-        // GÖRÜNMEZ CİHAZLARI FİLTRELEME
         final List<dynamic> unvisibleList = userData['unvisible_devices'] ?? [];
         bool isVisible(dynamic mac) => !unvisibleList.contains(mac.toString());
 
-        // Listeleri filtreleyerek alıyoruz
-        final List<dynamic> owned = (userData['owned_dispensers'] ?? []).where(isVisible).toList();
-        final List<dynamic> secondary = (userData['secondary_dispensers'] ?? []).where(isVisible).toList();
-        final List<dynamic> readOnly = (userData['read_only_dispensers'] ?? []).where(isVisible).toList();
+        final List<dynamic> owned = (userData['owned_dispensers'] ?? []).where(
+            isVisible).toList();
+        final List<dynamic> secondary = (userData['secondary_dispensers'] ?? [])
+            .where(isVisible)
+            .toList();
+        final List<dynamic> readOnly = (userData['read_only_dispensers'] ?? [])
+            .where(isVisible)
+            .toList();
         final List<dynamic> deviceGroups = userData['device_groups'] ?? [];
 
         final List<Map<String, dynamic>> allDevices = [];
-        for (var mac in owned) allDevices.add({'mac': mac, 'role': 'owner'});
-        for (var mac in secondary) if (!allDevices.any((d) => d['mac'] == mac)) allDevices.add({'mac': mac, 'role': 'secondary'});
-        for (var mac in readOnly) if (!allDevices.any((d) => d['mac'] == mac)) allDevices.add({'mac': mac, 'role': 'readOnly'});
+        for (var mac in owned)
+          allDevices.add({'mac': mac, 'role': 'owner'});
+        for (var mac in secondary)
+          if (!allDevices.any((d) => d['mac'] == mac)) allDevices.add(
+              {'mac': mac, 'role': 'secondary'});
+        for (var mac in readOnly)
+          if (!allDevices.any((d) => d['mac'] == mac)) allDevices.add(
+              {'mac': mac, 'role': 'readOnly'});
 
-        // Filtrelenmiş listeye göre boş durumu kontrolü
         if (allDevices.isEmpty && deviceGroups.isEmpty) {
-          return const Center(child: Padding(padding: EdgeInsets.all(24.0), child: Text("Henüz bir cihazınız yok.", textAlign: TextAlign.center)));
+          return Center(
+            child: Padding(
+              padding: const EdgeInsets.all(24.0),
+              child: Text(
+                "no_devices".tr(),
+                textAlign: TextAlign.center,
+              ),
+            ),
+          );
         }
 
         Set<String> groupedMacs = {};
         for (var group in deviceGroups) {
           List<dynamic> devices = group['devices'] ?? [];
-          for (var d in devices) groupedMacs.add(d.toString());
+          for (var d in devices)
+            groupedMacs.add(d.toString());
         }
 
         List<Map<String, dynamic>> ungroupedDevices = allDevices
             .where((device) => !groupedMacs.contains(device['mac']))
             .toList();
 
-        // ANA LİSTE DRAG TARGET (BOŞLUĞA BIRAKMA ALANI)
         return DragTarget<String>(
           onWillAccept: (data) => widget.isDragMode && data != null,
           onAccept: (macAddress) {
-            _dbService.moveDeviceToGroup(uid, macAddress, ""); // Grubu temizle
-            ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Cihaz ana listeye alındı.")));
+            _dbService.moveDeviceToGroup(uid, macAddress, "");
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(content: Text("device_moved_main".tr())),
+            );
           },
           builder: (context, candidateData, rejectedData) {
             return AnimatedContainer(
@@ -269,12 +335,15 @@ class _DeviceListScreenState extends State<DeviceListScreen> {
                   ? Colors.red.withOpacity(0.05)
                   : Colors.transparent,
               child: ListView(
-                padding: const EdgeInsets.only(top: 20.0, bottom: 80, left: 16, right: 16),
+                padding: const EdgeInsets.only(
+                    top: 20.0, bottom: 80, left: 16, right: 16),
                 children: [
                   // Bilgi Kartı
                   AnimatedCrossFade(
                     duration: const Duration(milliseconds: 300),
-                    crossFadeState: widget.isDragMode ? CrossFadeState.showFirst : CrossFadeState.showSecond,
+                    crossFadeState: widget.isDragMode
+                        ? CrossFadeState.showFirst
+                        : CrossFadeState.showSecond,
                     firstChild: Container(
                       padding: const EdgeInsets.all(12),
                       margin: const EdgeInsets.only(bottom: 16),
@@ -289,8 +358,9 @@ class _DeviceListScreenState extends State<DeviceListScreen> {
                           const SizedBox(width: 8),
                           Expanded(
                             child: Text(
-                              "Düzenlemek için sürükleyin. Cihazı listeden kaldırmak için sağdaki çöp kutusuna basın.",
-                              style: TextStyle(color: Colors.amber.shade900, fontSize: 13),
+                              "drag_instruction".tr(),
+                              style: TextStyle(
+                                  color: Colors.amber.shade900, fontSize: 13),
                             ),
                           ),
                         ],
@@ -300,20 +370,29 @@ class _DeviceListScreenState extends State<DeviceListScreen> {
                   ),
 
                   // KLASÖRLER
-                  ...deviceGroups.map((group) => _buildGroupCard(uid, group, allDevices)).toList(),
+                  ...deviceGroups.map((group) =>
+                      _buildGroupCard(uid, group, allDevices)).toList(),
 
                   const SizedBox(height: 10),
 
                   // DİĞER CİHAZLAR BAŞLIĞI
                   if (deviceGroups.isNotEmpty && ungroupedDevices.isNotEmpty)
                     Padding(
-                      padding: const EdgeInsets.symmetric(vertical: 8.0, horizontal: 4),
-                      child: Text("Diğer Cihazlar", style: TextStyle(fontWeight: FontWeight.bold, color: Colors.grey.shade600, fontSize: 16)),
+                      padding: const EdgeInsets.symmetric(
+                          vertical: 8.0, horizontal: 4),
+                      child: Text(
+                        "other_devices".tr(),
+                        style: TextStyle(fontWeight: FontWeight.bold,
+                            color: Colors.blueGrey.shade600,
+                            fontSize: 16),
+                      ),
                     ),
 
                   // CİHAZLAR
                   ...ungroupedDevices.map((device) {
-                    return _buildDraggableOrNormalCard(uid, device['mac'], device['role'], isInsideGroup: false);
+                    return _buildDraggableOrNormalCard(
+                        uid, device['mac'], device['role'],
+                        isInsideGroup: false);
                   }).toList(),
 
                   const SizedBox(height: 150),
@@ -326,53 +405,59 @@ class _DeviceListScreenState extends State<DeviceListScreen> {
     );
   }
 
-  // --- KLASÖR KARTI ---
+  // --- KLASÖR KARTI  ---
   Widget _buildGroupCard(String uid, Map<String, dynamic> group, List<Map<String, dynamic>> allDevices) {
     String groupId = group['id'] ?? "";
     String groupName = group['name'];
     List<dynamic> groupMacs = group['devices'] ?? [];
-
-    // GÖRÜNMEZLERİ BURADA DA FİLTRELEMEK GEREKİR
-    // Eğer bir cihaz gruba eklenmiş ama sonradan gizlenmişse, grupta da görünmemeli.
-    // Ancak üstteki allDevices zaten filtrelenmiş olduğu için,
-    // allDevices içinde olmayan mac'leri göstermeyeceğiz.
     List<dynamic> visibleGroupMacs = groupMacs.where((mac) => allDevices.any((d) => d['mac'] == mac)).toList();
 
     Widget cardContent = Card(
-      elevation: 4,
+      elevation: 0,
       margin: EdgeInsets.zero,
+      color: Colors.white,
       shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(22),
-        side: BorderSide(
-          color: widget.isDragMode ? Colors.blue.shade300 : Colors.grey.shade200,
-          width: widget.isDragMode ? 2 : 1,
-        ),
+        borderRadius: BorderRadius.circular(16),
+        side: BorderSide(color: Colors.blueGrey.shade50, width: 1),
       ),
       child: InkWell(
         onLongPress: () => widget.onModeChanged(true),
-        borderRadius: BorderRadius.circular(22),
+        borderRadius: BorderRadius.circular(16),
         child: Theme(
           data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
           child: ExpansionTile(
             initiallyExpanded: widget.isDragMode,
-            tilePadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            tilePadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4), // Dikey boşluk hafif artırıldı
+            childrenPadding: const EdgeInsets.only(bottom: 12),
             leading: Container(
-              padding: const EdgeInsets.all(8),
+              padding: const EdgeInsets.all(8), // İkon alanı hafif genişletildi
               decoration: BoxDecoration(color: Colors.orange.shade50, shape: BoxShape.circle),
-              child: Icon(Icons.meeting_room_rounded, color: Colors.orange.shade800, size: 28),
+              child: Icon(Icons.folder_open_rounded, color: Colors.orange.shade800, size: 24),
             ),
-            title: Text(groupName, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
-            subtitle: Text("${visibleGroupMacs.length} Cihaz", style: TextStyle(color: Colors.grey.shade600)),
+
+            // --- GÜNCELLEME BURADA ---
+            // Başlık fontu 15'ten 18'e çıkarıldı (Dışarıdaki cihazlarla birebir aynı oldu)
+            title: Text(
+                groupName,
+                style: const TextStyle(
+                    fontWeight: FontWeight.w700,
+                    fontSize: 18, // GÜNCELLENDİ
+                    color: Color(0xFF0F5191) // Derin Deniz Mavisi
+                )
+            ),
+
+            subtitle: Text("${visibleGroupMacs.length} ${"device_count_suffix".tr()}",
+                style: TextStyle(color: Colors.blueGrey.shade400, fontSize: 12)),
             trailing: widget.isDragMode
                 ? Row(
               mainAxisSize: MainAxisSize.min,
               children: [
                 IconButton(
-                  icon: const Icon(Icons.edit, color: Colors.blue),
+                  icon: const Icon(Icons.edit, color: Colors.blue, size: 22),
                   onPressed: () => _showRenameGroupDialog(uid, groupId, groupName),
                 ),
                 IconButton(
-                  icon: const Icon(Icons.delete_outline, color: Colors.red),
+                  icon: const Icon(Icons.delete_outline, color: Colors.red, size: 22),
                   onPressed: () => _showDeleteConfirmDialog(uid, groupId),
                 ),
               ],
@@ -393,19 +478,24 @@ class _DeviceListScreenState extends State<DeviceListScreen> {
         onAccept: (macAddress) {
           _dbService.moveDeviceToGroup(uid, macAddress, groupId);
           HapticFeedback.lightImpact();
-          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Cihaz $groupName odasına taşındı"), duration: const Duration(milliseconds: 800)));
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text("device_moved_room".tr(args: [groupName])),
+              duration: const Duration(milliseconds: 800),
+            ),
+          );
         },
         builder: (context, candidateData, rejectedData) {
           final isHovering = candidateData.isNotEmpty;
           return TweenAnimationBuilder<double>(
             duration: const Duration(milliseconds: 200),
             curve: Curves.easeOutBack,
-            tween: Tween<double>(begin: 1.0, end: isHovering ? 1.05 : 1.0),
+            tween: Tween<double>(begin: 1.0, end: isHovering ? 1.02 : 1.0),
             builder: (context, scale, child) {
               return Transform.scale(
                 scale: scale,
                 child: Container(
-                  margin: const EdgeInsets.only(bottom: 16),
+                  margin: const EdgeInsets.only(bottom: 12),
                   padding: const EdgeInsets.symmetric(vertical: 4),
                   color: Colors.transparent,
                   child: cardContent,
@@ -418,15 +508,15 @@ class _DeviceListScreenState extends State<DeviceListScreen> {
     }
 
     return Container(
-      margin: const EdgeInsets.only(bottom: 16),
+      margin: const EdgeInsets.only(bottom: 12),
       child: cardContent,
     );
   }
 
-  // --- CİHAZ KARTI ---
-  Widget _buildDraggableOrNormalCard(String uid, String macAddress, String role, {required bool isInsideGroup}) {
+  Widget _buildDraggableOrNormalCard(String uid, String macAddress, String role,
+      {required bool isInsideGroup}) {
     Widget card = _buildDeviceCardUI(
-      uid, // UID EKLENDİ
+      uid,
       macAddress,
       role,
       isInsideGroup: isInsideGroup,
@@ -446,11 +536,15 @@ class _DeviceListScreenState extends State<DeviceListScreen> {
       feedback: Material(
         color: Colors.transparent,
         child: SizedBox(
-          width: MediaQuery.of(context).size.width * 0.85,
+          width: MediaQuery
+              .of(context)
+              .size
+              .width * 0.85,
           child: Card(
             elevation: 10,
             color: Colors.white.withOpacity(0.95),
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+            shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(16)),
             child: Padding(
               padding: const EdgeInsets.all(12),
               child: Row(
@@ -459,8 +553,9 @@ class _DeviceListScreenState extends State<DeviceListScreen> {
                   const SizedBox(width: 12),
                   Expanded(
                     child: Text(
-                      "Taşınıyor: $macAddress",
-                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+                      "${"moving".tr()}: $macAddress",
+                      style: const TextStyle(
+                          fontWeight: FontWeight.bold, fontSize: 16),
                       overflow: TextOverflow.ellipsis,
                     ),
                   ),
@@ -474,152 +569,206 @@ class _DeviceListScreenState extends State<DeviceListScreen> {
     );
   }
 
-  // --- CİHAZ UI ---
-  Widget _buildDeviceCardUI(String uid, String macAddress, String role, // uid parametresi eklendi
-          {required bool isInsideGroup, required bool interactive, required VoidCallback onLongPress}) {
+// --- MODERN & MARKALI CİHAZ KARTI UI (HİZALAMA VE BOYUT DÜZELTİLDİ) ---
+  Widget _buildDeviceCardUI(String uid, String macAddress, String role,
+      {required bool isInsideGroup, required bool interactive, required VoidCallback onLongPress}) {
     return StreamBuilder<DocumentSnapshot>(
-      stream: FirebaseFirestore.instance.collection('dispenser').doc(macAddress).snapshots(),
+      stream: FirebaseFirestore.instance
+          .collection('dispenser')
+          .doc(macAddress)
+          .snapshots(),
       builder: (context, deviceSnapshot) {
-        String deviceName = "Yükleniyor...";
+        String deviceName = "loading".tr();
         bool exists = false;
 
         if (deviceSnapshot.hasData && deviceSnapshot.data!.exists) {
           final data = deviceSnapshot.data!.data() as Map<String, dynamic>;
-          deviceName = data['device_name'] ?? "Akıllı İlaç Kutusu";
+          deviceName = data['device_name'] ?? "default_device_name".tr();
           exists = true;
         }
 
-        Color roleColor;
+        // --- BOYUT VE MARGIN AYARLARI (GÜNCELLENDİ) ---
+
+        // Klasör içi yükseklik artırıldı: 85 -> 105 (Daha rahat okunur)
+        final double cardHeight = isInsideGroup ? 105.0 : 130.0;
+
+        // Klasör içi resim büyütüldü: 50 -> 60
+        final double imageSize = isInsideGroup ? 60.0 : 85.0;
+
+        // Klasör içi font büyütüldü: 14 -> 15.5
+        final double titleFontSize = isInsideGroup ? 15.5 : 18.0;
+
+        // MARGIN DÜZELTMESİ:
+        // ListView zaten 16px padding veriyor.
+        // Klasör dışındakilere (isInsideGroup=false) '0' vererek klasörle aynı hizaya getirdik.
+        // Klasör içindekilere (isInsideGroup=true) '4' vererek hafif içeride durmasını sağladık (Hiyerarşi için).
+        final double horizontalMargin = isInsideGroup ? 4.0 : 0.0;
+        final double verticalMargin = isInsideGroup ? 4.0 : 8.0;
+
+        Color roleBgColor;
+        Color roleTextColor;
         String roleText;
         IconData roleIcon;
 
+        const Color colorTurquoise = Color(0xFF36C0A6);
+        const Color colorSkyBlue = Color(0xFF1D8AD6);
+        const Color colorDeepSea = Color(0xFF0F5191);
+
         if (role == 'owner') {
-          roleColor = Colors.green;
-          roleText = "SAHİP";
-          roleIcon = Icons.verified_user;
+          roleBgColor = colorTurquoise.withOpacity(0.12);
+          roleTextColor = colorTurquoise;
+          roleText = "owner".tr();
+          roleIcon = Icons.verified_user_rounded;
         } else if (role == 'secondary') {
-          roleColor = Colors.blue;
-          roleText = "YÖNETİCİ";
-          roleIcon = Icons.security;
+          roleBgColor = colorSkyBlue.withOpacity(0.12);
+          roleTextColor = colorSkyBlue;
+          roleText = "admin".tr();
+          roleIcon = Icons.security_rounded;
         } else {
-          roleColor = Colors.orange;
-          roleText = "İZLEYİCİ";
-          roleIcon = Icons.visibility;
+          roleBgColor = Colors.grey.shade100;
+          roleTextColor = colorDeepSea.withOpacity(0.7);
+          roleText = "viewer".tr();
+          roleIcon = Icons.visibility_rounded;
         }
 
-        return SizedBox(
-          height: isInsideGroup ? 160 : 195,
+        return Container(
+          height: cardHeight,
           width: double.infinity,
+          margin: EdgeInsets.symmetric(
+            vertical: verticalMargin,
+            horizontal: horizontalMargin, // Düzeltilmiş kenar boşluğu
+          ),
           child: Card(
-            margin: EdgeInsets.symmetric(
-              vertical: 8,
-              horizontal: isInsideGroup ? 8 : 0,
-            ),
-            elevation: isInsideGroup ? 2 : 6,
-            shadowColor: Colors.black26,
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(22),
-              side: const BorderSide(color: Colors.black, width: 1.0),
-            ),
-            child: Container(
-              decoration: const BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.bottomLeft,
-                  end: Alignment.topRight,
-                  colors: [Color(0xFFFFD9D9), Color(0xFFFFFFFF)],
-                ),
-                borderRadius: BorderRadius.all(Radius.circular(22)),
-              ),
-              child: InkWell(
-                onTap: (exists && interactive)
-                    ? () {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(builder: (context) => HomeScreen(macAddress: macAddress)),
-                  );
-                }
-                    : null,
-                onLongPress: onLongPress,
-                borderRadius: BorderRadius.circular(22),
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 16),
-                  child: Row(
-                    crossAxisAlignment: CrossAxisAlignment.center,
-                    children: [
-                      ClipRRect(
-                        borderRadius: BorderRadius.circular(12.0),
+            clipBehavior: Clip.antiAlias,
+            // CardTheme main.dart'tan geliyor
+            child: InkWell(
+              onTap: (exists && interactive)
+                  ? () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                      builder: (context) => HomeScreen(macAddress: macAddress)),
+                );
+              }
+                  : null,
+              onLongPress: onLongPress,
+              child: Padding(
+                // Klasör içi padding biraz daha ferahlatıldı (8 -> 10)
+                padding: EdgeInsets.all(isInsideGroup ? 10.0 : 12.0),
+                child: Row(
+                  children: [
+                    Container(
+                      width: imageSize,
+                      height: imageSize,
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFF0F9FF),
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: Colors.blue.shade50),
+                      ),
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(12),
                         child: Image.asset(
                           'assets/dispenser_icon.png',
-                          width: isInsideGroup ? 70 : 90,
-                          height: isInsideGroup ? 80 : 100,
                           fit: BoxFit.cover,
+                          errorBuilder: (c, o, s) =>
+                              Icon(Icons.medication, color: colorSkyBlue,
+                                  size: imageSize * 0.5),
                         ),
                       ),
-                      const SizedBox(width: 16),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                              margin: const EdgeInsets.only(bottom: 8),
-                              decoration: BoxDecoration(
-                                color: roleColor.withOpacity(0.1),
-                                borderRadius: BorderRadius.circular(8),
-                                border: Border.all(color: roleColor.withOpacity(0.5)),
-                              ),
-                              child: Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  Icon(roleIcon, size: 12, color: roleColor),
-                                  const SizedBox(width: 4),
-                                  Text(roleText, style: TextStyle(color: roleColor, fontSize: 10, fontWeight: FontWeight.bold)),
-                                ],
-                              ),
+                    ),
+                    const SizedBox(width: 12),
+
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 6, vertical: 2),
+                            margin: const EdgeInsets.only(bottom: 4),
+                            decoration: BoxDecoration(
+                              color: roleBgColor,
+                              borderRadius: BorderRadius.circular(6),
                             ),
-                            Text(
-                              deviceName.toUpperCase(),
-                              style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                                fontWeight: FontWeight.bold,
-                                fontSize: isInsideGroup ? 16 : 18,
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                // Rol ikonu ve yazısı da büyütüldü
+                                Icon(roleIcon, size: isInsideGroup ? 12 : 14,
+                                    color: roleTextColor),
+                                const SizedBox(width: 4),
+                                Flexible(
+                                  child: Text(
+                                    roleText,
+                                    style: TextStyle(
+                                      color: roleTextColor,
+                                      // Klasör içi rol yazısı 9 -> 11 oldu (Okunabilirlik arttı)
+                                      fontSize: isInsideGroup ? 11 : 12,
+                                      fontWeight: FontWeight.w700,
+                                    ),
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          Flexible(
+                            child: Text(
+                              deviceName,
+                              style: TextStyle(
+                                color: colorDeepSea,
+                                fontWeight: FontWeight.w700,
+                                fontSize: titleFontSize, // 15.5 oldu
                               ),
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                             ),
-                            Text(
-                              'MAC: $macAddress',
-                              style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                                color: Colors.grey.shade700,
-                                fontFamily: 'monospace',
+                          ),
+                          Flexible(
+                            child: Text(
+                              macAddress,
+                              style: TextStyle(
+                                color: Colors.blueGrey.shade400,
+                                fontSize: isInsideGroup ? 11.5 : 12,
+                                // Hafif büyütüldü
+                                fontFamily: 'Courier',
+                                letterSpacing: -0.3,
                               ),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
                             ),
-                          ],
-                        ),
+                          ),
+                        ],
                       ),
-                      // DÜZENLEME MODU KONTROLLERİ
-                      if (widget.isDragMode)
-                        Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            // 1. ÇÖP KUTUSU (GİZLEME)
-                            IconButton(
-                              icon: const Icon(Icons.delete_outline, color: Colors.red),
-                              tooltip: "Listeden Gizle",
-                              onPressed: () => _showHideDeviceDialog(uid, macAddress),
-                            ),
-                            // 2. SÜRÜKLEME TUTAMACI
-                            const Icon(Icons.drag_indicator, color: Colors.grey),
-                          ],
-                        )
-                      else if (role != 'readOnly' && interactive)
-                        IconButton(
-                          icon: const Icon(Icons.edit_outlined, color: Colors.black87),
-                          tooltip: 'Cihaz adını düzenle',
-                          onPressed: () => _showEditNameDialog(macAddress, deviceName),
-                        ),
-                    ],
-                  ),
+                    ),
+
+                    if (widget.isDragMode)
+                      Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          IconButton(
+                            iconSize: isInsideGroup ? 22 : 24,
+                            // Butonlar büyütüldü
+                            constraints: const BoxConstraints(),
+                            padding: EdgeInsets.zero,
+                            icon: const Icon(Icons.delete_outline_rounded,
+                                color: Colors.redAccent),
+                            onPressed: () =>
+                                _showHideDeviceDialog(uid, macAddress),
+                          ),
+                          const SizedBox(width: 8),
+                          Icon(Icons.drag_indicator_rounded, color: Colors.grey,
+                              size: isInsideGroup ? 22 : 24),
+                        ],
+                      )
+                    else
+                      if (role != 'readOnly' && interactive)
+                        Icon(Icons.chevron_right_rounded,
+                            color: Colors.blueGrey.shade200,
+                            size: isInsideGroup ? 22 : 24),
+                  ],
                 ),
               ),
             ),
