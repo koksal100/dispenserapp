@@ -75,5 +75,9 @@
   "time_prefix": "Time",
   "passive": "Passive",
   "no_permission": "You do not have permission",
-  "edit": "Edit"
+  "edit": "Edit",
+  "dose_suffix": "Dose",
+  "reminder_times_header": "Reminder Times",
+  "add_time": "Add Time",
+  "no_times_added": "No times added"
 }

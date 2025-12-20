@@ -13,35 +13,35 @@ class DatabaseService {
 
   // --- TEMEL CİHAZ FONKSİYONLARI ---
 
-  // 1. İlaç saatlerini kaydetme (HEM FIRESTORE HEM RTDB)
+  // 1. İlaç saatlerini kaydetme (ÇOKLU SAAT DESTEKLİ - GÜNCELLENDİ)
   Future<void> saveSectionConfig(String macAddress, List<Map<String, dynamic>> sections) async {
     if (macAddress.isEmpty) return;
     try {
-      // A. Firestore'a kaydet (Uygulama içi kalıcılık için)
+      // A. Firestore'a kaydet (schedule listesi olarak)
       await _firestore.collection('dispenser').doc(macAddress).set({
         'section_config': sections,
       }, SetOptions(merge: true));
 
-      // B. Realtime Database'e kaydet (ESP32'nin okuması için)
-      // ESP32'nin kolay parse etmesi için yapıyı düzenliyoruz:
-      // /dispensers/{macAddress}/config/section_0/..
+      // B. Realtime Database'e kaydet (ESP32 için)
+      // Yapı: /dispensers/{macAddress}/config/section_0/schedule/[ {h:8, m:0}, {h:12, m:30} ]
       Map<String, dynamic> rtdbData = {};
 
       for (int i = 0; i < sections.length; i++) {
+        // schedule listesini alalım
+        List<dynamic> scheduleList = sections[i]['schedule'] ?? [];
+
         rtdbData['section_$i'] = {
-          'name': sections[i]['name'], // İsim opsiyonel ama dursun
-          'hour': sections[i]['hour'],
-          'minute': sections[i]['minute'],
+          'name': sections[i]['name'],
           'isActive': sections[i]['isActive'] ?? false,
-          'verildi': false // İlaç verildi bilgisini sıfırlıyoruz (isteğe bağlı)
+          'schedule': scheduleList, // ARTIK SADECE LİSTE GÖNDERİYORUZ
+          // 'hour' ve 'minute' alanları SİLİNDİ.
         };
       }
 
-      // RTDB'ye yazma işlemi
       DatabaseReference ref = _rtdb.ref("dispensers/$macAddress/config");
       await ref.set(rtdbData);
 
-      print("Veriler Firestore ve RTDB'ye başarıyla kaydedildi.");
+      print("Veriler (Çoklu Saat) başarıyla kaydedildi.");
 
     } catch (e) {
       print('Error saving section_config: $e');

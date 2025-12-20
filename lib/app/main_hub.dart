@@ -72,73 +72,122 @@ class _MainHubState extends State<MainHub> {
     }
   }
 
+  // --- YENİ MODERN PROFİL MENÜSÜ ---
   void _showProfileMenu() {
     showDialog(
       context: context,
       builder: (context) {
         return Dialog(
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+          backgroundColor: Colors.white,
+          surfaceTintColor: Colors.transparent,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
           child: Padding(
-            padding: const EdgeInsets.all(20.0),
+            padding: const EdgeInsets.all(24.0),
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                // Profil Fotoğrafı
-                CircleAvatar(
-                  radius: 40,
-                  backgroundColor: Theme.of(context).colorScheme.primary,
-                  backgroundImage: _currentUser?.photoURL != null
-                      ? NetworkImage(_currentUser!.photoURL!)
-                      : null,
-                  child: _currentUser?.photoURL == null
-                      ? Text(
-                    _currentUser?.displayName != null
-                        ? _currentUser!.displayName![0].toUpperCase()
-                        : "U",
-                    style: const TextStyle(fontSize: 30, color: Colors.white),
-                  )
-                      : null,
+                // Profil Fotoğrafı (Gölge Eklendi)
+                Container(
+                  padding: const EdgeInsets.all(4),
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    border: Border.all(color: const Color(0xFFE0F2FE), width: 2), // Açık Mavi Çerçeve
+                  ),
+                  child: CircleAvatar(
+                    radius: 42,
+                    backgroundColor: const Color(0xFF1D8AD6), // Gök Mavisi
+                    backgroundImage: _currentUser?.photoURL != null
+                        ? NetworkImage(_currentUser!.photoURL!)
+                        : null,
+                    child: _currentUser?.photoURL == null
+                        ? Text(
+                      _currentUser?.displayName != null
+                          ? _currentUser!.displayName![0].toUpperCase()
+                          : "U",
+                      style: const TextStyle(fontSize: 32, color: Colors.white, fontWeight: FontWeight.bold),
+                    )
+                        : null,
+                  ),
                 ),
                 const SizedBox(height: 16),
 
-                // "Oturum Açıldı" metni
-                Text("logged_in_as".tr(), style: const TextStyle(fontSize: 12, color: Colors.grey)),
-
+                // İsim ve Bilgi
                 Text(
-                  _currentUser?.displayName ?? "Kullanıcı",
-                  style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                  _currentUser?.displayName ?? "User",
+                  style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Color(0xFF0F5191)), // Derin Mavi
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  _currentUser?.email ?? "",
+                  style: TextStyle(fontSize: 12, color: Colors.blueGrey.shade400),
                   textAlign: TextAlign.center,
                 ),
                 const SizedBox(height: 24),
 
-                // --- AYARLAR MENÜSÜ ---
-                ListTile(
-                  leading: const Icon(Icons.settings),
-                  title: Text("settings_title".tr()), // "Ayarlar"
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                  onTap: () {
-                    Navigator.pop(context); // Menüyü kapat
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(builder: (context) => const SettingsScreen()),
-                    );
-                  },
+                // --- 1. MODERN AYARLAR BUTONU ---
+                Container(
+                  margin: const EdgeInsets.only(bottom: 12),
+                  decoration: BoxDecoration(
+                    color: Colors.grey.shade50,
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(color: Colors.grey.shade200),
+                  ),
+                  child: ListTile(
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                    leading: Container(
+                      padding: const EdgeInsets.all(8),
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(10),
+                        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 4)],
+                      ),
+                      child: const Icon(Icons.settings_rounded, color: Color(0xFF0F5191), size: 22),
+                    ),
+                    title: Text(
+                        "settings_title".tr(),
+                        style: const TextStyle(fontWeight: FontWeight.w600, color: Color(0xFF0F5191))
+                    ),
+                    trailing: Icon(Icons.chevron_right_rounded, color: Colors.blueGrey.shade300),
+                    onTap: () {
+                      Navigator.pop(context);
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(builder: (context) => const SettingsScreen()),
+                      );
+                    },
+                  ),
                 ),
-                const Divider(),
 
-                // --- ÇIKIŞ BUTONU ---
-                SizedBox(
-                  width: double.infinity,
-                  child: ElevatedButton.icon(
-                    onPressed: _signOut,
-                    icon: const Icon(Icons.logout),
-                    label: Text("logout".tr()), // "Çıkış Yap"
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Theme.of(context).colorScheme.errorContainer,
-                      foregroundColor: Theme.of(context).colorScheme.onErrorContainer,
+                // --- 2. MODERN ÇIKIŞ BUTONU (PASTEL KIRMIZI) ---
+                InkWell(
+                  onTap: _signOut,
+                  borderRadius: BorderRadius.circular(16),
+                  child: Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.symmetric(vertical: 16),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFFEF2F2), // Çok açık kırmızı zemin
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(color: const Color(0xFFFECACA)), // Açık kırmızı çerçeve
+                    ),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(Icons.logout_rounded, color: Colors.red.shade700, size: 20),
+                        const SizedBox(width: 10),
+                        Text(
+                            "logout".tr(),
+                            style: TextStyle(
+                                color: Colors.red.shade700,
+                                fontWeight: FontWeight.w700,
+                                fontSize: 15
+                            )
+                        ),
+                      ],
                     ),
                   ),
-                )
+                ),
               ],
             ),
           ),
@@ -201,30 +250,51 @@ class _MainHubState extends State<MainHub> {
         foregroundColor: colorScheme.onSurface,
         centerTitle: true,
 
-        // --- SOL ÜST: PROFİL FOTOĞRAFI ---
-        leading: Padding(
-          padding: const EdgeInsets.all(8.0),
-          child: InkWell(
-            onTap: _showProfileMenu,
-            borderRadius: BorderRadius.circular(50),
-            child: CircleAvatar(
-              backgroundColor: colorScheme.primary,
-              backgroundImage: _currentUser?.photoURL != null
-                  ? NetworkImage(_currentUser!.photoURL!)
-                  : null,
-              child: _currentUser?.photoURL == null
-                  ? Text(
-                _currentUser?.displayName != null
-                    ? _currentUser!.displayName![0].toUpperCase()
-                    : "U",
-                style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.white),
-              )
-                  : null,
+        // ÖNEMLİ: Sol taraftaki alanı genişlettik (Standart 56'dır, 74 yaptık)
+        // Böylece hem soldan boşluk bırakıp hem de resmi büyük tutabileceğiz.
+        leadingWidth: 74,
+
+        // --- SOL ÜST: PROFİL FOTOĞRAFI (BÜYÜK & ÇERÇEVELİ) ---
+        leading: Container(
+          // Soldan 20px boşluk bırakarak kenardan uzaklaştırdık
+          margin: const EdgeInsets.only(left: 20.0),
+          child: Center( // Dikeyde ortalamak için Center şart
+            child: InkWell(
+              onTap: _showProfileMenu,
+              borderRadius: BorderRadius.circular(50),
+              child: Container(
+                width: 46, // Çerçevenin toplam genişliği (Resim bunun içine sığacak)
+                height: 46,
+                padding: const EdgeInsets.all(3), // Çerçeve ile Resim arasındaki beyaz boşluk
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: Colors.transparent, // Arka plan şeffaf
+                  border: Border.all(
+                      color: const Color(0xFF1D8AD6).withOpacity(0.4), // Gök Mavisi Çerçeve
+                      width: 2.5 // Çerçeve kalınlığı artırıldı
+                  ),
+                ),
+                child: CircleAvatar(
+                  backgroundColor: colorScheme.primary,
+                  // Resmin kendisi (Padding yüzünden çerçeveden biraz küçük olur, şık durur)
+                  backgroundImage: _currentUser?.photoURL != null
+                      ? NetworkImage(_currentUser!.photoURL!)
+                      : null,
+                  child: _currentUser?.photoURL == null
+                      ? Text(
+                    _currentUser?.displayName != null
+                        ? _currentUser!.displayName![0].toUpperCase()
+                        : "U",
+                    style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.white, fontSize: 18),
+                  )
+                      : null,
+                ),
+              ),
             ),
           ),
         ),
+        // -----------------------------------------------------------------
 
-        // --- BAŞLIK (Dinamik Çeviri) ---
         title: Text(
           _selectedIndex == 0
               ? (_isDragMode ? 'edit_mode'.tr() : 'my_devices'.tr())
@@ -236,14 +306,14 @@ class _MainHubState extends State<MainHub> {
           if (_selectedIndex == 0)
             IconButton(
               icon: Icon(
-                _isDragMode ? Icons.close : Icons.menu,
+                _isDragMode ? Icons.check_circle_rounded : Icons.menu_rounded, // İkonları da modernleştirdim
                 size: 30,
-                color: _isDragMode ? colorScheme.error : colorScheme.onSurface,
+                color: _isDragMode ? colorScheme.primary : colorScheme.onSurface,
               ),
-              tooltip: _isDragMode ? 'edit_mode'.tr() : 'edit_mode'.tr(), // Tooltip de çevrilebilir
+              tooltip: _isDragMode ? 'edit_mode'.tr() : 'edit_mode'.tr(),
               onPressed: () => _toggleDragMode(!_isDragMode),
             ),
-          const SizedBox(width: 8),
+          const SizedBox(width: 12), // Sağ taraftan da biraz boşluk
         ],
       ),
 

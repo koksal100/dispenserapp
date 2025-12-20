@@ -75,5 +75,9 @@
   "time_prefix": "Saat",
   "passive": "Pasif",
   "no_permission": "Değiştirme yetkiniz yok",
-  "edit": "Düzenle"
+  "edit": "Düzenle",
+  "dose_suffix": "Doz",
+  "reminder_times_header": "Hatırlatma Saatleri",
+  "add_time": "Saat Ekle",
+  "no_times_added": "Saat eklenmedi"
 }

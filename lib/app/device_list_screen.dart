@@ -263,38 +263,24 @@ class _DeviceListScreenState extends State<DeviceListScreen> {
 
   Widget _buildDeviceList(String uid) {
     return StreamBuilder<DocumentSnapshot>(
-      stream: FirebaseFirestore.instance
-          .collection('users')
-          .doc(uid)
-          .snapshots(),
+      stream: FirebaseFirestore.instance.collection('users').doc(uid).snapshots(),
       builder: (context, userSnapshot) {
-        if (!userSnapshot.hasData || !userSnapshot.data!.exists)
-          return const CircularProgressIndicator();
+        if (!userSnapshot.hasData || !userSnapshot.data!.exists) return const CircularProgressIndicator();
 
         final userData = userSnapshot.data!.data() as Map<String, dynamic>;
 
         final List<dynamic> unvisibleList = userData['unvisible_devices'] ?? [];
         bool isVisible(dynamic mac) => !unvisibleList.contains(mac.toString());
 
-        final List<dynamic> owned = (userData['owned_dispensers'] ?? []).where(
-            isVisible).toList();
-        final List<dynamic> secondary = (userData['secondary_dispensers'] ?? [])
-            .where(isVisible)
-            .toList();
-        final List<dynamic> readOnly = (userData['read_only_dispensers'] ?? [])
-            .where(isVisible)
-            .toList();
+        final List<dynamic> owned = (userData['owned_dispensers'] ?? []).where(isVisible).toList();
+        final List<dynamic> secondary = (userData['secondary_dispensers'] ?? []).where(isVisible).toList();
+        final List<dynamic> readOnly = (userData['read_only_dispensers'] ?? []).where(isVisible).toList();
         final List<dynamic> deviceGroups = userData['device_groups'] ?? [];
 
         final List<Map<String, dynamic>> allDevices = [];
-        for (var mac in owned)
-          allDevices.add({'mac': mac, 'role': 'owner'});
-        for (var mac in secondary)
-          if (!allDevices.any((d) => d['mac'] == mac)) allDevices.add(
-              {'mac': mac, 'role': 'secondary'});
-        for (var mac in readOnly)
-          if (!allDevices.any((d) => d['mac'] == mac)) allDevices.add(
-              {'mac': mac, 'role': 'readOnly'});
+        for (var mac in owned) allDevices.add({'mac': mac, 'role': 'owner'});
+        for (var mac in secondary) if (!allDevices.any((d) => d['mac'] == mac)) allDevices.add({'mac': mac, 'role': 'secondary'});
+        for (var mac in readOnly) if (!allDevices.any((d) => d['mac'] == mac)) allDevices.add({'mac': mac, 'role': 'readOnly'});
 
         if (allDevices.isEmpty && deviceGroups.isEmpty) {
           return Center(
@@ -311,8 +297,7 @@ class _DeviceListScreenState extends State<DeviceListScreen> {
         Set<String> groupedMacs = {};
         for (var group in deviceGroups) {
           List<dynamic> devices = group['devices'] ?? [];
-          for (var d in devices)
-            groupedMacs.add(d.toString());
+          for (var d in devices) groupedMacs.add(d.toString());
         }
 
         List<Map<String, dynamic>> ungroupedDevices = allDevices
@@ -332,35 +317,44 @@ class _DeviceListScreenState extends State<DeviceListScreen> {
               duration: const Duration(milliseconds: 300),
               curve: Curves.easeInOut,
               color: candidateData.isNotEmpty
-                  ? Colors.red.withOpacity(0.05)
+                  ? const Color(0xFF1D8AD6).withOpacity(0.05) // Mavi hafif vurgu
                   : Colors.transparent,
               child: ListView(
-                padding: const EdgeInsets.only(
-                    top: 20.0, bottom: 80, left: 16, right: 16),
+                padding: const EdgeInsets.only(top: 20.0, bottom: 80, left: 16, right: 16),
                 children: [
-                  // Bilgi Kartı
+                  // --- BİLGİ KARTI (MODERN MAVİ TASARIM) ---
                   AnimatedCrossFade(
                     duration: const Duration(milliseconds: 300),
-                    crossFadeState: widget.isDragMode
-                        ? CrossFadeState.showFirst
-                        : CrossFadeState.showSecond,
+                    crossFadeState: widget.isDragMode ? CrossFadeState.showFirst : CrossFadeState.showSecond,
+
+                    // 1. GÖRÜNÜM (Düzenleme Modu Açıkken)
                     firstChild: Container(
-                      padding: const EdgeInsets.all(12),
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                       margin: const EdgeInsets.only(bottom: 16),
                       decoration: BoxDecoration(
-                        color: Colors.amber.shade50,
-                        borderRadius: BorderRadius.circular(12),
-                        border: Border.all(color: Colors.amber.shade200),
+                        color: const Color(0xFFF0F9FF), // Çok açık gök mavisi zemin
+                        borderRadius: BorderRadius.circular(16),
+                        border: Border.all(color: const Color(0xFFBAE6FD)), // Açık mavi çerçeve
                       ),
                       child: Row(
                         children: [
-                          Icon(Icons.touch_app, color: Colors.amber.shade800),
-                          const SizedBox(width: 8),
+                          Container(
+                            padding: const EdgeInsets.all(8),
+                            decoration: const BoxDecoration(
+                              color: Colors.white,
+                              shape: BoxShape.circle,
+                            ),
+                            child: const Icon(Icons.touch_app_rounded, color: Color(0xFF0F5191), size: 20), // Derin Mavi İkon
+                          ),
+                          const SizedBox(width: 12),
                           Expanded(
                             child: Text(
                               "drag_instruction".tr(),
-                              style: TextStyle(
-                                  color: Colors.amber.shade900, fontSize: 13),
+                              style: const TextStyle(
+                                  color: Color(0xFF0F5191), // Derin Mavi Yazı
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w500
+                              ),
                             ),
                           ),
                         ],
@@ -370,29 +364,23 @@ class _DeviceListScreenState extends State<DeviceListScreen> {
                   ),
 
                   // KLASÖRLER
-                  ...deviceGroups.map((group) =>
-                      _buildGroupCard(uid, group, allDevices)).toList(),
+                  ...deviceGroups.map((group) => _buildGroupCard(uid, group, allDevices)).toList(),
 
                   const SizedBox(height: 10),
 
                   // DİĞER CİHAZLAR BAŞLIĞI
                   if (deviceGroups.isNotEmpty && ungroupedDevices.isNotEmpty)
                     Padding(
-                      padding: const EdgeInsets.symmetric(
-                          vertical: 8.0, horizontal: 4),
+                      padding: const EdgeInsets.symmetric(vertical: 8.0, horizontal: 4),
                       child: Text(
                         "other_devices".tr(),
-                        style: TextStyle(fontWeight: FontWeight.bold,
-                            color: Colors.blueGrey.shade600,
-                            fontSize: 16),
+                        style: TextStyle(fontWeight: FontWeight.bold, color: Colors.blueGrey.shade600, fontSize: 16),
                       ),
                     ),
 
                   // CİHAZLAR
                   ...ungroupedDevices.map((device) {
-                    return _buildDraggableOrNormalCard(
-                        uid, device['mac'], device['role'],
-                        isInsideGroup: false);
+                    return _buildDraggableOrNormalCard(uid, device['mac'], device['role'], isInsideGroup: false);
                   }).toList(),
 
                   const SizedBox(height: 150),
@@ -430,9 +418,15 @@ class _DeviceListScreenState extends State<DeviceListScreen> {
             tilePadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4), // Dikey boşluk hafif artırıldı
             childrenPadding: const EdgeInsets.only(bottom: 12),
             leading: Container(
-              padding: const EdgeInsets.all(8), // İkon alanı hafif genişletildi
-              decoration: BoxDecoration(color: Colors.orange.shade50, shape: BoxShape.circle),
-              child: Icon(Icons.folder_open_rounded, color: Colors.orange.shade800, size: 24),
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                // Turuncu yerine Açık Gök Mavisi (Temaya uygun)
+                color: const Color(0xFFF0F9FF),
+                shape: BoxShape.circle,
+                border: Border.all(color: const Color(0xFFE0F2FE)), // Çok hafif çerçeve
+              ),
+              // İkon rengi: Derin Deniz Mavisi
+              child: const Icon(Icons.folder_open_rounded, color: Color(0xFF0F5191), size: 24),
             ),
 
             // --- GÜNCELLEME BURADA ---
