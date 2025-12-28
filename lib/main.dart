@@ -1,8 +1,10 @@
 import 'dart:async';
 import 'package:alarm/alarm.dart';
 import 'package:dispenserapp/app/alarm_ring_screen.dart';
+import 'package:dispenserapp/app/welcome_screen.dart'; // EKLENDİ: Karşılama Ekranı
 import 'package:dispenserapp/services/notification_service.dart';
 import 'package:easy_localization/easy_localization.dart';
+import 'package:firebase_auth/firebase_auth.dart'; // EKLENDİ: Oturum kontrolü için
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -122,9 +124,9 @@ void main() async {
 
   await EasyLocalization.ensureInitialized();
 
-  // Bildirim ve Alarm Servisini Başlat
+  // Bildirim servisini başlatıyoruz ancak izin istemeyi BURADAN KALDIRDIK.
+  // İzinler artık WelcomeScreen içerisinde isteniyor.
   await NotificationService.initializeNotifications();
-  await NotificationService.requestPermission();
 
   runApp(
     EasyLocalization(
@@ -195,7 +197,11 @@ class _MyAppState extends State<MyApp> {
       localizationsDelegates: context.localizationDelegates,
       supportedLocales: context.supportedLocales,
       locale: context.locale,
-      home: const MainHub(),
+      // GÜNCELLEME BURADA:
+      // Kullanıcı oturum açmışsa direkt ana sayfaya, açmamışsa karşılama ekranına.
+      home: FirebaseAuth.instance.currentUser == null
+          ? const WelcomeScreen()
+          : const MainHub(),
       debugShowCheckedModeBanner: false,
     );
   }

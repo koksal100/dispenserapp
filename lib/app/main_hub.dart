@@ -1,13 +1,14 @@
 import 'package:dispenserapp/app/home_screen.dart';
+import 'package:dispenserapp/app/login_screen.dart'; // <--- YENİ EKLENDİ
 import 'package:dispenserapp/features/ble_provisioning/sync_screen.dart';
 import 'package:dispenserapp/app/relatives_screen.dart';
 import 'package:dispenserapp/services/auth_service.dart';
 import 'package:dispenserapp/services/database_service.dart';
-import 'package:easy_localization/easy_localization.dart'; // Çeviri paketi
+import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 
 import 'device_list_screen.dart';
-import 'settings_screen.dart'; // Ayarlar sayfası
+import 'settings_screen.dart';
 
 class MainHub extends StatefulWidget {
   const MainHub({super.key});
@@ -21,7 +22,6 @@ class _MainHubState extends State<MainHub> {
   final DatabaseService _dbService = DatabaseService();
   int _selectedIndex = 0;
 
-  // Sürükle Bırak Modu Aktif mi?
   bool _isDragMode = false;
 
   AppUser? _currentUser;
@@ -41,11 +41,10 @@ class _MainHubState extends State<MainHub> {
   void _onItemTapped(int index) {
     setState(() {
       _selectedIndex = index;
-      _isDragMode = false; // Sayfa değişince modu kapat
+      _isDragMode = false;
     });
   }
 
-  // Modu değiştiren fonksiyon
   void _toggleDragMode(bool value) {
     setState(() {
       _isDragMode = value;
@@ -53,26 +52,34 @@ class _MainHubState extends State<MainHub> {
     if (value) {
       ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text("drag_info".tr()), // Çeviri: "Düzenlemek için sürükleyin..."
+            content: Text("drag_info".tr()),
             duration: const Duration(seconds: 2),
           )
       );
     }
   }
 
+  // --- GÜNCELLENEN ÇIKIŞ FONKSİYONU ---
   Future<void> _signOut() async {
-    await _authService.signOut();
-    final newUser = await _authService.getOrCreateUser();
-    setState(() {
-      _currentUser = newUser;
-    });
-    // Menü açıksa kapat
+    // 1. Profil menüsü (Dialog) açıksa kapat
     if (mounted && Navigator.canPop(context)) {
       Navigator.of(context).pop();
     }
+
+    // 2. Firebase ve Google oturumunu kapat
+    await _authService.signOut();
+
+    // 3. Login Ekranına Yönlendir ve Geçmişi Temizle
+    // (Böylece kullanıcı "Geri" tuşuna basıp tekrar uygulamaya giremez)
+    if (mounted) {
+      Navigator.of(context).pushAndRemoveUntil(
+        MaterialPageRoute(builder: (context) => const LoginScreen()),
+            (route) => false, // Tüm geçmiş rotaları sil
+      );
+    }
   }
 
-  // --- YENİ MODERN PROFİL MENÜSÜ ---
+  // --- PROFİL MENÜSÜ ---
   void _showProfileMenu() {
     showDialog(
       context: context,
@@ -86,16 +93,16 @@ class _MainHubState extends State<MainHub> {
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                // Profil Fotoğrafı (Gölge Eklendi)
+                // Profil Fotoğrafı
                 Container(
                   padding: const EdgeInsets.all(4),
                   decoration: BoxDecoration(
                     shape: BoxShape.circle,
-                    border: Border.all(color: const Color(0xFFE0F2FE), width: 2), // Açık Mavi Çerçeve
+                    border: Border.all(color: const Color(0xFFE0F2FE), width: 2),
                   ),
                   child: CircleAvatar(
                     radius: 42,
-                    backgroundColor: const Color(0xFF1D8AD6), // Gök Mavisi
+                    backgroundColor: const Color(0xFF1D8AD6),
                     backgroundImage: _currentUser?.photoURL != null
                         ? NetworkImage(_currentUser!.photoURL!)
                         : null,
@@ -114,7 +121,7 @@ class _MainHubState extends State<MainHub> {
                 // İsim ve Bilgi
                 Text(
                   _currentUser?.displayName ?? "User",
-                  style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Color(0xFF0F5191)), // Derin Mavi
+                  style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Color(0xFF0F5191)),
                   textAlign: TextAlign.center,
                 ),
                 const SizedBox(height: 4),
@@ -125,7 +132,7 @@ class _MainHubState extends State<MainHub> {
                 ),
                 const SizedBox(height: 24),
 
-                // --- 1. MODERN AYARLAR BUTONU ---
+                // Ayarlar Butonu
                 Container(
                   margin: const EdgeInsets.only(bottom: 12),
                   decoration: BoxDecoration(
@@ -159,17 +166,17 @@ class _MainHubState extends State<MainHub> {
                   ),
                 ),
 
-                // --- 2. MODERN ÇIKIŞ BUTONU (PASTEL KIRMIZI) ---
+                // Çıkış Butonu
                 InkWell(
-                  onTap: _signOut,
+                  onTap: _signOut, // Güncellenen fonksiyon çağrılıyor
                   borderRadius: BorderRadius.circular(16),
                   child: Container(
                     width: double.infinity,
                     padding: const EdgeInsets.symmetric(vertical: 16),
                     decoration: BoxDecoration(
-                      color: const Color(0xFFFEF2F2), // Çok açık kırmızı zemin
+                      color: const Color(0xFFFEF2F2),
                       borderRadius: BorderRadius.circular(16),
-                      border: Border.all(color: const Color(0xFFFECACA)), // Açık kırmızı çerçeve
+                      border: Border.all(color: const Color(0xFFFECACA)),
                     ),
                     child: Row(
                       mainAxisAlignment: MainAxisAlignment.center,
@@ -201,16 +208,16 @@ class _MainHubState extends State<MainHub> {
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        title: Text("create_room".tr()), // "Yeni Oda Oluştur"
+        title: Text("create_room".tr()),
         content: TextField(
           controller: controller,
-          decoration: InputDecoration(hintText: "room_name_hint".tr()), // "Örn: 102 Nolu Oda"
+          decoration: InputDecoration(hintText: "room_name_hint".tr()),
           autofocus: true,
         ),
         actions: [
           TextButton(
               onPressed: () => Navigator.pop(context),
-              child: Text("cancel".tr()) // "İptal"
+              child: Text("cancel".tr())
           ),
           ElevatedButton(
             onPressed: () {
@@ -219,7 +226,7 @@ class _MainHubState extends State<MainHub> {
               }
               Navigator.pop(context);
             },
-            child: Text("create".tr()), // "Oluştur"
+            child: Text("create".tr()),
           )
         ],
       ),
@@ -238,7 +245,8 @@ class _MainHubState extends State<MainHub> {
         onModeChanged: _toggleDragMode,
       );
     } else if (_selectedIndex == 1) {
-      currentScreen = const SyncScreen();
+      // MainHub içinden çağrıldığı için isOnboarding: false
+      currentScreen = const SyncScreen(isOnboarding: false);
     } else {
       currentScreen = const RelativesScreen();
     }
@@ -249,34 +257,27 @@ class _MainHubState extends State<MainHub> {
         backgroundColor: theme.scaffoldBackgroundColor,
         foregroundColor: colorScheme.onSurface,
         centerTitle: true,
-
-        // ÖNEMLİ: Sol taraftaki alanı genişlettik (Standart 56'dır, 74 yaptık)
-        // Böylece hem soldan boşluk bırakıp hem de resmi büyük tutabileceğiz.
         leadingWidth: 74,
-
-        // --- SOL ÜST: PROFİL FOTOĞRAFI (BÜYÜK & ÇERÇEVELİ) ---
         leading: Container(
-          // Soldan 20px boşluk bırakarak kenardan uzaklaştırdık
           margin: const EdgeInsets.only(left: 20.0),
-          child: Center( // Dikeyde ortalamak için Center şart
+          child: Center(
             child: InkWell(
               onTap: _showProfileMenu,
               borderRadius: BorderRadius.circular(50),
               child: Container(
-                width: 46, // Çerçevenin toplam genişliği (Resim bunun içine sığacak)
+                width: 46,
                 height: 46,
-                padding: const EdgeInsets.all(3), // Çerçeve ile Resim arasındaki beyaz boşluk
+                padding: const EdgeInsets.all(3),
                 decoration: BoxDecoration(
                   shape: BoxShape.circle,
-                  color: Colors.transparent, // Arka plan şeffaf
+                  color: Colors.transparent,
                   border: Border.all(
-                      color: const Color(0xFF1D8AD6).withOpacity(0.4), // Gök Mavisi Çerçeve
-                      width: 2.5 // Çerçeve kalınlığı artırıldı
+                      color: const Color(0xFF1D8AD6).withOpacity(0.4),
+                      width: 2.5
                   ),
                 ),
                 child: CircleAvatar(
                   backgroundColor: colorScheme.primary,
-                  // Resmin kendisi (Padding yüzünden çerçeveden biraz küçük olur, şık durur)
                   backgroundImage: _currentUser?.photoURL != null
                       ? NetworkImage(_currentUser!.photoURL!)
                       : null,
@@ -293,55 +294,49 @@ class _MainHubState extends State<MainHub> {
             ),
           ),
         ),
-        // -----------------------------------------------------------------
-
         title: Text(
           _selectedIndex == 0
               ? (_isDragMode ? 'edit_mode'.tr() : 'my_devices'.tr())
               : (_selectedIndex == 1 ? 'sync'.tr() : 'relatives'.tr()),
           style: theme.textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold),
         ),
-
         actions: [
           if (_selectedIndex == 0)
             IconButton(
               icon: Icon(
-                _isDragMode ? Icons.check_circle_rounded : Icons.menu_rounded, // İkonları da modernleştirdim
+                _isDragMode ? Icons.check_circle_rounded : Icons.menu_rounded,
                 size: 30,
                 color: _isDragMode ? colorScheme.primary : colorScheme.onSurface,
               ),
               tooltip: _isDragMode ? 'edit_mode'.tr() : 'edit_mode'.tr(),
               onPressed: () => _toggleDragMode(!_isDragMode),
             ),
-          const SizedBox(width: 12), // Sağ taraftan da biraz boşluk
+          const SizedBox(width: 12),
         ],
       ),
-
       body: currentScreen,
-
       floatingActionButton: (_selectedIndex == 0 && _isDragMode)
           ? FloatingActionButton.extended(
         onPressed: _showCreateFolderDialog,
         icon: const Icon(Icons.create_new_folder),
-        label: Text("add_room".tr()), // "Oda Ekle"
+        label: Text("add_room".tr()),
         backgroundColor: colorScheme.primary,
         foregroundColor: colorScheme.onPrimary,
       )
           : null,
-
       bottomNavigationBar: BottomNavigationBar(
         items: <BottomNavigationBarItem>[
           BottomNavigationBarItem(
               icon: const Icon(Icons.devices_other_rounded),
-              label: 'my_devices'.tr() // "Cihazlarım"
+              label: 'my_devices'.tr()
           ),
           BottomNavigationBarItem(
               icon: const Icon(Icons.sync_rounded),
-              label: 'sync'.tr() // "Senkronizasyon"
+              label: 'sync'.tr()
           ),
           BottomNavigationBarItem(
               icon: const Icon(Icons.people_alt_rounded),
-              label: 'relatives'.tr() // "Yakınlarım"
+              label: 'relatives'.tr()
           ),
         ],
         currentIndex: _selectedIndex,

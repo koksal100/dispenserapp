@@ -1,12 +1,15 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 import 'package:easy_localization/easy_localization.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:dispenserapp/services/database_service.dart';
+import 'package:dispenserapp/app/main_hub.dart';
 
-// --- ÇEVİRİ KÖPRÜSÜ
+// Çeviri yardımcısı
 String getTranslated(BuildContext context, String key) {
-
   return key.tr();
 }
 
@@ -37,6 +40,46 @@ class _WifiCredentialsScreenState extends State<WifiCredentialsScreen> {
     _ssidController.dispose();
     _passwordController.dispose();
     super.dispose();
+  }
+
+  // --- KRİTİK DÜZELTME: WIFI MAC ADRESİNİ HESAPLAMA ---
+  Future<void> _finalizeSetup() async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user != null) {
+      // 1. Bluetooth MAC adresini al (Örn: AA:BB:CC:11:22:FE)
+      String rawMac = widget.device.remoteId.str.toUpperCase();
+      String finalMacAddress = rawMac; // Varsayılan olarak aynısı kalsın (Hata durumunda)
+
+      // 2. Android ise ve MAC adresi formatı doğruysa hesaplama yap
+      if (Platform.isAndroid && rawMac.contains(":")) {
+        try {
+          List<String> parts = rawMac.split(':');
+
+          if (parts.length == 6) {
+            // Son baytı (Örn: FE) al ve sayıya çevir
+            int lastByte = int.parse(parts[5], radix: 16);
+
+            // ESP32'de WiFi MAC, Bluetooth MAC'ten 2 eksiktir.
+            // (Örn: BT=...:FE ise WiFi=...:FC'dir)
+            int wifiLastByte = (lastByte - 2) & 0xFF;
+
+            // Yeni son baytı Hex string'e çevir ve yerine koy
+            parts[5] = wifiLastByte.toRadixString(16).toUpperCase().padLeft(2, '0');
+
+            // Parçaları tekrar birleştir (Örn: AA:BB:CC:11:22:FC)
+            finalMacAddress = parts.join(':');
+
+            debugPrint("ORJİNAL BLE MAC: $rawMac -> HESAPLANAN WIFI MAC: $finalMacAddress");
+          }
+        } catch (e) {
+          debugPrint("MAC hesaplama hatası: $e");
+        }
+      }
+
+      // 3. Hesaplanan doğru "WiFi MAC" adresini veritabanına kaydet
+      final db = DatabaseService();
+      await db.addDeviceManually(user.uid, user.email!, finalMacAddress);
+    }
   }
 
   Future<void> _sendCredentials() async {
@@ -101,7 +144,7 @@ class _WifiCredentialsScreenState extends State<WifiCredentialsScreen> {
         String response = utf8.decode(value).trim();
         debugPrint("ESP32 Response: $response");
 
-        if (response == "SUCCESS") {
+        if (response.startsWith("SUCCESS")) {
           if (!responseCompleter.isCompleted) responseCompleter.complete("SUCCESS");
         } else if (response == "FAIL") {
           if (!responseCompleter.isCompleted) responseCompleter.complete("FAIL");
@@ -141,6 +184,11 @@ class _WifiCredentialsScreenState extends State<WifiCredentialsScreen> {
       // 7. Sonuç
       if (finalResult == "SUCCESS") {
         setState(() { _statusMessage = getTranslated(context, 'success_caps'); });
+
+        // --- İŞLEM BAŞARILI: ARKA PLANDA KAYDET ---
+        // Burada _finalizeSetup fonksiyonu, hesaplanan doğru MAC adresini kaydedecek.
+        await _finalizeSetup();
+
         _showResultDialog(true);
       } else if (finalResult == "FAIL") {
         setState(() { _statusMessage = getTranslated(context, 'error_password'); });
@@ -189,9 +237,13 @@ class _WifiCredentialsScreenState extends State<WifiCredentialsScreen> {
         actions: [
           TextButton(
             onPressed: () {
-              Navigator.pop(ctx);
+              Navigator.pop(ctx); // Dialogu kapat
               if (success) {
-                Navigator.pop(context);
+                // Başarılı ise Ana Ekrana git ve tüm geçmişi sil
+                Navigator.of(context).pushAndRemoveUntil(
+                  MaterialPageRoute(builder: (context) => const MainHub()),
+                      (route) => false,
+                );
               }
             },
             child: Text(
@@ -218,6 +270,7 @@ class _WifiCredentialsScreenState extends State<WifiCredentialsScreen> {
         backgroundColor: Colors.transparent,
         elevation: 0,
         iconTheme: const IconThemeData(color: Colors.black87),
+        centerTitle: true,
       ),
       body: SafeArea(
         child: SingleChildScrollView(
@@ -240,7 +293,7 @@ class _WifiCredentialsScreenState extends State<WifiCredentialsScreen> {
                 const SizedBox(height: 20),
                 // Cihaz Adı
                 Text(
-                  widget.device.platformName,
+                  widget.device.platformName.isNotEmpty ? widget.device.platformName : "MedTrack Device",
                   textAlign: TextAlign.center,
                   style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: Colors.grey.shade800),
                 ),

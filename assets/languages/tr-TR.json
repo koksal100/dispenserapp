@@ -1,3 +1,4 @@
+
 {
   "settings_title": "Ayarlar",
   "language_option": "Dil Seçeneği",
@@ -121,5 +122,19 @@
   "wifi_ssid": "WiFi Adı (SSID)",
   "wifi_hint": "Örn: Ev_Internet",
   "wifi_pass": "WiFi Şifresi",
-  "connect_setup_btn": "BAĞLAN VE KUR"
+  "connect_setup_btn": "BAĞLAN VE KUR",
+  "welcome_prefix": "Hoş Geldiniz",
+  "login_start_btn": "Başla",
+  "permissions_title": "İzinler Gerekli",
+  "permissions_description": "İlaç hatırlatmalarının zamanında gelmesi ve cihazın stabil çalışması için; Bildirim, Bluetooth ve Alarm izinlerinin eksiksiz verilmesi gerekmektedir.",
+  "permissions_button": "İzinleri Ver ve Devam Et",
+  "login_title": "Google ile giriş yap.",
+  "login_subtitle": "Cihazlarınızı yedeklemek, ailenizle paylaşmak ve verilerinizi güvende tutmak için giriş yapın.",
+  "google_sign_in": "Google ile Devam Et",
+  "error_occurred": "Hata oluştu: {}",
+  "onboarding_device_not_found": "Cihaz Bulunamadı",
+  "onboarding_searching": "Cihaz Aranıyor",
+  "onboarding_no_device_desc": "Hesabınıza bağlı bir MedTrack cihazı yok. Hadi hemen bir tane kuralım!",
+  "onboarding_search_desc": "Yakındaki MedTrack cihazları taranıyor. Cihazın fişe takılı olduğundan emin olun.",
+  "add_later_btn": "Daha Sonra Ekle"
 }

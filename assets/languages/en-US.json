@@ -1,3 +1,4 @@
+
 {
   "settings_title": "Settings",
   "language_option": "Language Option",
@@ -121,5 +122,19 @@
   "wifi_ssid": "WiFi Name (SSID)",
   "wifi_hint": "Ex: Home_Wifi",
   "wifi_pass": "WiFi Password",
-  "connect_setup_btn": "CONNECT & SETUP"
+  "connect_setup_btn": "CONNECT & SETUP",
+  "welcome_prefix": "Welcome to",
+  "login_start_btn": "Get Started",
+  "error_occurred": "An error occurred: {}",
+  "permissions_title": "Permissions Required",
+  "permissions_description": "To ensure timely medication reminders and stable device connection, please grant Notifications, Bluetooth, and Alarm permissions fully.",
+  "permissions_button": "Grant & Continue",
+  "login_title": "Sign in with Google.",
+  "login_subtitle": "Sign in to backup your devices, share with family, and keep your data secure.",
+  "google_sign_in": "Continue with Google",
+  "onboarding_device_not_found": "Device Not Found",
+  "onboarding_searching": "Searching Device",
+  "onboarding_no_device_desc": "There is no MedTrack device linked to your account. Let's set one up!",
+  "onboarding_search_desc": "Scanning for nearby MedTrack devices. Make sure the device is plugged in.",
+  "add_later_btn": "Add Later"
 }
