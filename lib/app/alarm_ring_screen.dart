@@ -1,45 +1,71 @@
 import 'dart:io';
 import 'dart:ui'; // ImageFilter için
 import 'package:alarm/alarm.dart';
+import 'package:dispenserapp/main.dart'; // globalAlarmState'e erişmek için
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:wakelock_plus/wakelock_plus.dart'; // EKRANIN AÇIK KALMASI İÇİN
 
-class AlarmRingScreen extends StatelessWidget {
+class AlarmRingScreen extends StatefulWidget {
   final AlarmSettings alarmSettings;
 
   const AlarmRingScreen({super.key, required this.alarmSettings});
 
-  static const platform = MethodChannel('com.example.dispenserapp/lock_check');
+  @override
+  State<AlarmRingScreen> createState() => _AlarmRingScreenState();
+}
+
+class _AlarmRingScreenState extends State<AlarmRingScreen> {
+  static const platform = MethodChannel('com.example.dispenserapp/lock_control');
 
   // --- RENK PALETİ ---
   static const Color colTurquoise = Color(0xFF36C0A6);
   static const Color colSkyBlue = Color(0xFF1D8AD6);
   static const Color colDeepSea = Color(0xFF0F5191);
 
-  Future<void> _handleStop(BuildContext context) async {
-    await Alarm.stop(alarmSettings.id);
+  @override
+  void initState() {
+    super.initState();
+    // Ekranın kapanmasını engelle
+    WakelockPlus.enable();
+  }
 
-    bool isLocked = false;
+  @override
+  void dispose() {
+    WakelockPlus.disable();
+    super.dispose();
+  }
+
+  Future<void> _handleStop() async {
+    // 1. Alarmı sustur
+    await Alarm.stop(widget.alarmSettings.id);
+
+    // 2. Kilit ekranı iznini kapat
     try {
-      if (Platform.isAndroid) {
-        isLocked = await platform.invokeMethod('isDeviceLocked');
-      }
+      await platform.invokeMethod('hideFromLockScreen');
     } catch (e) {
-      isLocked = true;
+      debugPrint("Error hiding from lock screen: $e");
     }
 
-    if (!context.mounted) return;
+    // 3. EKRANI KAPATMA MANTIĞI (Overlay'i kaldır)
+    // Global değişkeni null yapınca builder yeniden tetiklenir ve bu ekran kaybolur.
+    globalAlarmState.value = null;
 
-    if (isLocked) {
+    // 4. Eğer Android'de kilitliysek uygulamayı tamamen alta at (veya kapat)
+    // ki kullanıcı kilit ekranını görsün.
+    if (Platform.isAndroid) {
+      // SystemNavigator.pop() uygulamayı öldürür.
+      // Eğer uygulamanın açık kalmasını istiyorsan bunu kaldırabilirsin
+      // ama kilit ekranı güvenliği için önerilir.
       SystemNavigator.pop();
-    } else {
-      Navigator.pop(context);
     }
   }
 
   @override
   Widget build(BuildContext context) {
+    // MaterialApp içinde Overlay olarak çalıştığı için Scaffold şart.
+    // PopScope: Geri tuşunu engelle.
     return PopScope(
       canPop: false,
       child: Scaffold(
@@ -51,17 +77,13 @@ class AlarmRingScreen extends StatelessWidget {
                 gradient: LinearGradient(
                   begin: Alignment.topLeft,
                   end: Alignment.bottomRight,
-                  colors: [
-                    colDeepSea,   // Sol Üst
-                    colSkyBlue,   // Orta
-                    colTurquoise, // Sağ Alt
-                  ],
+                  colors: [colDeepSea, colSkyBlue, colTurquoise],
                   stops: [0.2, 0.6, 1.0],
                 ),
               ),
             ),
 
-            // Hafif Arka Plan Deseni (Modernlik katar)
+            // Hafif Arka Plan Deseni
             Positioned(
               top: -100,
               right: -100,
@@ -78,10 +100,10 @@ class AlarmRingScreen extends StatelessWidget {
             // 2. İÇERİK (ORTALANMIŞ)
             SafeArea(
               child: SizedBox(
-                width: double.infinity, // EKRAN GENİŞLİĞİNİ KAPLA (Ortalamak için şart)
+                width: double.infinity,
                 child: Column(
-                  mainAxisAlignment: MainAxisAlignment.spaceEvenly, // Dikeyde eşit dağıt
-                  crossAxisAlignment: CrossAxisAlignment.center,    // Yatayda ORTALA
+                  mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                  crossAxisAlignment: CrossAxisAlignment.center,
                   children: [
 
                     // --- ÜST KISIM: SAAT ---
@@ -95,10 +117,11 @@ class AlarmRingScreen extends StatelessWidget {
                               "${DateTime.now().hour.toString().padLeft(2, '0')}:${DateTime.now().minute.toString().padLeft(2, '0')}",
                               style: const TextStyle(
                                 fontSize: 90,
-                                fontWeight: FontWeight.w200, // Çok ince modern font
+                                fontWeight: FontWeight.w200,
                                 color: Colors.white,
                                 height: 1,
-                                fontFamily: 'Roboto', // Varsa özel font
+                                fontFamily: 'Roboto',
+                                decoration: TextDecoration.none, // Overlay'de textDecoration şart olabilir
                               ),
                               textAlign: TextAlign.center,
                             ),
@@ -110,6 +133,7 @@ class AlarmRingScreen extends StatelessWidget {
                                 color: Colors.white.withOpacity(0.8),
                                 fontWeight: FontWeight.w400,
                                 letterSpacing: 1.2,
+                                decoration: TextDecoration.none,
                               ),
                               textAlign: TextAlign.center,
                             ),
@@ -122,7 +146,7 @@ class AlarmRingScreen extends StatelessWidget {
                     Column(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        // İlaç Görseli / İkonu
+                        // İlaç Görseli
                         Container(
                           height: 200,
                           width: 200,
@@ -141,7 +165,6 @@ class AlarmRingScreen extends StatelessWidget {
                             child: Image.asset(
                               'assets/pill_icon.png',
                               fit: BoxFit.contain,
-                              // EĞER RESİM YOKSA BU İKON GÖZÜKÜR
                               errorBuilder: (context, error, stackTrace) {
                                 return const Icon(
                                     Icons.medication_liquid_rounded,
@@ -156,12 +179,13 @@ class AlarmRingScreen extends StatelessWidget {
 
                         // Başlık
                         Text(
-                          alarmSettings.notificationSettings.title,
+                          widget.alarmSettings.notificationSettings.title,
                           style: const TextStyle(
                             fontSize: 28,
                             color: Colors.white,
                             fontWeight: FontWeight.bold,
                             letterSpacing: 0.5,
+                            decoration: TextDecoration.none,
                           ),
                           textAlign: TextAlign.center,
                         ),
@@ -171,11 +195,12 @@ class AlarmRingScreen extends StatelessWidget {
                         Padding(
                           padding: const EdgeInsets.symmetric(horizontal: 40.0),
                           child: Text(
-                            alarmSettings.notificationSettings.body,
+                            widget.alarmSettings.notificationSettings.body,
                             style: TextStyle(
-                                fontSize: 18,
-                                color: Colors.white.withOpacity(0.9),
-                                height: 1.4
+                              fontSize: 18,
+                              color: Colors.white.withOpacity(0.9),
+                              height: 1.4,
+                              decoration: TextDecoration.none,
                             ),
                             textAlign: TextAlign.center,
                             maxLines: 3,
@@ -185,11 +210,11 @@ class AlarmRingScreen extends StatelessWidget {
                       ],
                     ),
 
-                    // --- ALT KISIM: BUTON ---
+                    // --- ALT KISIM: DURDUR BUTONU ---
                     Padding(
                       padding: const EdgeInsets.only(bottom: 20.0),
                       child: GestureDetector(
-                        onTap: () => _handleStop(context),
+                        onTap: _handleStop,
                         child: ClipRRect(
                           borderRadius: BorderRadius.circular(50),
                           child: BackdropFilter(
@@ -217,10 +242,11 @@ class AlarmRingScreen extends StatelessWidget {
                                   Text(
                                     "stop_alarm".tr().toUpperCase(),
                                     style: const TextStyle(
-                                        color: Colors.white,
-                                        fontSize: 20,
-                                        fontWeight: FontWeight.bold,
-                                        letterSpacing: 2
+                                      color: Colors.white,
+                                      fontSize: 20,
+                                      fontWeight: FontWeight.bold,
+                                      letterSpacing: 2,
+                                      decoration: TextDecoration.none,
                                     ),
                                   ),
                                 ],

@@ -5,6 +5,7 @@ import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:permission_handler/permission_handler.dart';
+import 'package:shared_preferences/shared_preferences.dart'; // <--- EKLENDİ
 
 class PermissionsScreen extends StatefulWidget {
   const PermissionsScreen({super.key});
@@ -47,7 +48,6 @@ class _PermissionsScreenState extends State<PermissionsScreen> with TickerProvid
   Future<void> _requestPermissions() async {
     setState(() => _isLoading = true);
 
-    // Küçük bir bekleme ekleyip thread'i kilitlemeyi önlüyoruz
     await Future.delayed(const Duration(milliseconds: 100));
 
     if (Platform.isAndroid) {
@@ -67,8 +67,13 @@ class _PermissionsScreenState extends State<PermissionsScreen> with TickerProvid
       await [Permission.notification, Permission.bluetooth].request();
     }
 
+    // --- DEĞİŞİKLİK BURADA ---
+    // Kullanıcının bu aşamayı geçtiğini kaydediyoruz.
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('onboarding_complete', true);
+    // -------------------------
+
     if (mounted) {
-      // Sayfa geçiş animasyonu (Fade)
       Navigator.of(context).pushReplacement(
         PageRouteBuilder(
           pageBuilder: (context, animation, secondaryAnimation) => const LoginScreen(),
@@ -83,6 +88,7 @@ class _PermissionsScreenState extends State<PermissionsScreen> with TickerProvid
 
   @override
   Widget build(BuildContext context) {
+    // ... (UI KODLARI AYNI KALIYOR)
     return Scaffold(
       backgroundColor: AppColors.background,
       body: SafeArea(
@@ -92,15 +98,12 @@ class _PermissionsScreenState extends State<PermissionsScreen> with TickerProvid
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
               const Spacer(),
-
-              // Animasyonlu Alan
               FadeTransition(
                 opacity: _fadeAnimation,
                 child: SlideTransition(
                   position: _slideAnimation,
                   child: Column(
                     children: [
-                      // İkon Alanı - Statik olduğu için const
                       Container(
                         padding: const EdgeInsets.all(24),
                         decoration: BoxDecoration(
@@ -133,10 +136,7 @@ class _PermissionsScreenState extends State<PermissionsScreen> with TickerProvid
                   ),
                 ),
               ),
-
               const Spacer(),
-
-              // Buton Alanı
               FadeTransition(
                 opacity: _fadeAnimation,
                 child: SlideTransition(
@@ -157,7 +157,6 @@ class _PermissionsScreenState extends State<PermissionsScreen> with TickerProvid
   }
 }
 
-// Butonu ayırarak rebuild maliyetini düşürüyoruz
 class _PermissionButton extends StatelessWidget {
   final VoidCallback onTap;
   const _PermissionButton({required this.onTap});

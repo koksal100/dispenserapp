@@ -26,6 +26,7 @@ dependencies:
   awesome_notifications: ^0.10.1
   firebase_database: ^11.1.0
   easy_localization: ^3.0.8
+  wakelock_plus: ^1.4.0
 dev_dependencies:
   flutter_test:
     sdk: flutter

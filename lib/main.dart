@@ -1,16 +1,25 @@
 import 'dart:async';
+
 import 'package:alarm/alarm.dart';
 import 'package:dispenserapp/app/alarm_ring_screen.dart';
-import 'package:dispenserapp/app/welcome_screen.dart'; // EKLENDİ: Karşılama Ekranı
+import 'package:dispenserapp/app/login_screen.dart';
+import 'package:dispenserapp/app/main_hub.dart';
+import 'package:dispenserapp/app/welcome_screen.dart';
+import 'package:dispenserapp/services/auth_service.dart';
 import 'package:dispenserapp/services/notification_service.dart';
 import 'package:easy_localization/easy_localization.dart';
-import 'package:firebase_auth/firebase_auth.dart'; // EKLENDİ: Oturum kontrolü için
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+
 import 'firebase_options.dart';
-import 'app/main_hub.dart';
+
+// --- GLOBAL DURUM YÖNETİCİLERİ ---
+final ValueNotifier<AlarmSettings?> globalAlarmState = ValueNotifier<AlarmSettings?>(null);
+final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 
 // --- MEDTRACK RENK PALETİ ---
 class AppColors {
@@ -108,25 +117,19 @@ ThemeData get appTheme {
   );
 }
 
-// GLOBAL NAVIGATOR KEY
-final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
-
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
   await Firebase.initializeApp(
     options: DefaultFirebaseOptions.currentPlatform,
   );
+
+  await EasyLocalization.ensureInitialized();
 
   SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
     statusBarColor: Colors.transparent,
     statusBarIconBrightness: Brightness.dark,
   ));
-
-  await EasyLocalization.ensureInitialized();
-
-  // Bildirim servisini başlatıyoruz ancak izin istemeyi BURADAN KALDIRDIK.
-  // İzinler artık WelcomeScreen içerisinde isteniyor.
-  await NotificationService.initializeNotifications();
 
   runApp(
     EasyLocalization(
@@ -146,63 +149,148 @@ class MyApp extends StatefulWidget {
 }
 
 class _MyAppState extends State<MyApp> {
-  late StreamSubscription<AlarmSettings> subscription;
-  // Kanal isminin MainActivity.kt ile AYNI olduğundan emin olun
-  static const platform = MethodChannel('com.example.dispenserapp/lock_check');
+  static const platform = MethodChannel('com.example.dispenserapp/lock_control');
+  StreamSubscription<AlarmSettings>? _alarmSubscription;
 
   @override
   void initState() {
     super.initState();
-    // ALARM DİNLEYİCİSİ
-    subscription = Alarm.ringStream.stream.listen((alarmSettings) {
-      debugPrint("Alarm tetiklendi! Ekran açılıyor...");
-
-      // 1. Önce Native tarafa "Uygulamayı öne getir" komutu gönder
-      _bringAppToFront();
-
-      // 2. Sonra Flutter içinde sayfayı aç
-      if (navigatorKey.currentState != null) {
-        navigatorKey.currentState!.push(
-          MaterialPageRoute(
-            builder: (context) => AlarmRingScreen(alarmSettings: alarmSettings),
-          ),
-        );
-      }
+    _alarmSubscription = Alarm.ringStream.stream.listen((alarmSettings) async {
+      try {
+        await platform.invokeMethod('showOnLockScreen');
+      } catch (_) {}
+      globalAlarmState.value = alarmSettings;
     });
-  }
-
-  Future<void> _bringAppToFront() async {
-    try {
-      // Android ise native kodu tetikle
-      if (Theme.of(context).platform == TargetPlatform.android) {
-        await platform.invokeMethod('bringToFront');
-      }
-    } catch (e) {
-      print("Öne getirme hatası: $e");
-    }
   }
 
   @override
   void dispose() {
-    subscription.cancel();
+    _alarmSubscription?.cancel();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      navigatorKey: navigatorKey, // BU KEY ÖNEMLİ
+      navigatorKey: navigatorKey,
       title: 'MedTrack',
       theme: appTheme,
       localizationsDelegates: context.localizationDelegates,
       supportedLocales: context.supportedLocales,
       locale: context.locale,
-      // GÜNCELLEME BURADA:
-      // Kullanıcı oturum açmışsa direkt ana sayfaya, açmamışsa karşılama ekranına.
-      home: FirebaseAuth.instance.currentUser == null
-          ? const WelcomeScreen()
-          : const MainHub(),
       debugShowCheckedModeBanner: false,
+      builder: (context, child) {
+        return ValueListenableBuilder<AlarmSettings?>(
+          valueListenable: globalAlarmState,
+          builder: (context, alarmSettings, _) {
+            return Stack(
+              children: [
+                if (child != null) child,
+                if (alarmSettings != null)
+                  Positioned.fill(
+                    child: AlarmRingScreen(alarmSettings: alarmSettings),
+                  ),
+              ],
+            );
+          },
+        );
+      },
+      home: const RootGate(),
+    );
+  }
+}
+
+class RootGate extends StatefulWidget {
+  const RootGate({super.key});
+
+  @override
+  State<RootGate> createState() => _RootGateState();
+}
+
+class _RootGateState extends State<RootGate> {
+  bool _isInitDone = false;
+  bool _onboardingComplete = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _appBootstrap();
+  }
+
+  Future<void> _appBootstrap() async {
+    try {
+      // Notification + lock screen kanal init
+      await NotificationService.initializeNotifications();
+      const platform = MethodChannel('com.example.dispenserapp/lock_control');
+      try {
+        await platform.invokeMethod('hideFromLockScreen');
+      } catch (_) {}
+
+      // SharedPreferences
+      final prefs = await SharedPreferences.getInstance();
+      _onboardingComplete = prefs.getBool('onboarding_complete') ?? false;
+
+      // ✅ KRİTİK: Session restore (Silent Sign-In)
+      // Daha önce login olduysa (user_uid var) ama Firebase currentUser null ise,
+      // Login ekranına düşmeden önce sessizce restore etmeyi dene.
+      final hasCachedUid = prefs.getString('user_uid') != null;
+      if (hasCachedUid && FirebaseAuth.instance.currentUser == null) {
+        await AuthService().signInSilently();
+      }
+
+      // Cold start alarm kontrolü
+      final alarms = await Alarm.getAlarms();
+      for (var alarm in alarms) {
+        if (alarm.dateTime.isBefore(DateTime.now()) &&
+            alarm.dateTime.add(const Duration(minutes: 10)).isAfter(DateTime.now())) {
+          if (await Alarm.isRinging(alarm.id)) {
+            globalAlarmState.value = alarm;
+          }
+        }
+      }
+    } catch (e) {
+      debugPrint("Bootstrap Hatası: $e");
+    } finally {
+      if (mounted) setState(() => _isInitDone = true);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (!_isInitDone) {
+      return const Scaffold(
+        backgroundColor: AppColors.background,
+        body: Center(child: CircularProgressIndicator(color: AppColors.skyBlue)),
+      );
+    }
+
+    return StreamBuilder<User?>(
+      stream: FirebaseAuth.instance.authStateChanges(),
+      builder: (context, snapshot) {
+        // Firebase hala state yayınlıyor olabilir
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          // Cache doluysa göz kırpma engelle
+          if (FirebaseAuth.instance.currentUser != null) {
+            return const MainHub();
+          }
+          return const Scaffold(
+            backgroundColor: AppColors.background,
+            body: Center(child: CircularProgressIndicator(color: AppColors.skyBlue)),
+          );
+        }
+
+        // Kullanıcı var
+        if (snapshot.hasData) {
+          return const MainHub();
+        }
+
+        // Kullanıcı yok
+        if (_onboardingComplete) {
+          return const LoginScreen();
+        }
+
+        return const WelcomeScreen();
+      },
     );
   }
 }

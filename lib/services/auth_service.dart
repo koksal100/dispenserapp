@@ -1,8 +1,8 @@
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:dispenserapp/services/database_service.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
 
 class AppUser {
   final String uid;
@@ -14,7 +14,7 @@ class AppUser {
     required this.uid,
     this.displayName,
     this.photoURL,
-    this.email
+    this.email,
   });
 }
 
@@ -24,19 +24,17 @@ class AuthService {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
   final DatabaseService _dbService = DatabaseService();
 
+  /// Kullanıcı ilk kez butona basınca (interactive) çağır.
+  /// Varsa mevcut Firebase oturumunu kullanır, yoksa Google Sign-In açar.
   Future<AppUser?> getOrCreateUser() async {
     final prefs = await SharedPreferences.getInstance();
-
-    // 1. Önce Firebase Auth'ta zaten oturum açmış bir kullanıcı var mı bakalım.
     User? firebaseUser = _auth.currentUser;
 
-    // 2. Eğer oturum yoksa Google Sign-In başlatalım
+    // Firebase oturumu yoksa -> interactive Google sign-in
     if (firebaseUser == null) {
       try {
         final GoogleSignInAccount? googleUser = await _googleSignIn.signIn();
-        if (googleUser == null) {
-          return null; // Kullanıcı girişi iptal etti
-        }
+        if (googleUser == null) return null; // kullanıcı iptal etti
 
         final GoogleSignInAuthentication googleAuth = await googleUser.authentication;
         final AuthCredential credential = GoogleAuthProvider.credential(
@@ -52,47 +50,77 @@ class AuthService {
       }
     }
 
-    // 3. Kullanıcı (firebaseUser) elimizdeyse işlemleri yapalım
-    if (firebaseUser != null) {
-      final uid = firebaseUser.uid;
-      final email = firebaseUser.email;
-      final displayName = firebaseUser.displayName;
-      final photoURL = firebaseUser.photoURL;
+    if (firebaseUser == null) return null;
 
-      // SharedPreferences'a UID'yi yedekleyelim (Session kontrolü için kullanıyorsanız)
-      await prefs.setString('user_uid', uid);
+    // Kullanıcıyı normalize et (prefs + firestore + device list)
+    return _postAuthSync(firebaseUser, prefs: prefs);
+  }
 
-      // --- KRİTİK GÜNCELLEME BURASI ---
-      // Her açılışta, Firebase'den gelen en güncel İsim ve Fotoğrafı Firestore'a YAZIYORUZ.
-      // Bu sayede "Yakınlarım" ekranında fotoğraflar her zaman güncel kalır.
-      try {
-        await _firestore.collection('users').doc(uid).set({
-          'email': email,
-          'displayName': displayName ?? '',
-          'photoURL': photoURL ?? '',
-          'lastLogin': FieldValue.serverTimestamp(), // Son görülme zamanı
-          // 'createdAt': FieldValue.serverTimestamp(), // Bunu set ile her seferinde ezmemek için update kullanmak daha iyi olabilir veya merge ile createdAt varsa dokunma mantığı gerekebilir ama şimdilik set merge:true yeterli.
-        }, SetOptions(merge: true)); // merge: true -> Mevcut cihaz listesi vb. verileri silme, sadece bunları güncelle.
-      } catch (e) {
-        print('Firestore update error: $e');
-      }
-      // ---------------------------------
+  /// Uygulama yeniden açıldığında session restore için çağır.
+  /// Google hesabı cihazda varsa sessizce token alır ve Firebase’e tekrar oturtur.
+  Future<User?> signInSilently() async {
+    try {
+      // Zaten kullanıcı varsa hiçbir şey yapma
+      final existing = _auth.currentUser;
+      if (existing != null) return existing;
 
-      // Cihaz listelerini senkronize et (DatabaseService)
-      if (email != null) {
-        await _dbService.updateUserDeviceList(uid, email);
-      }
+      final GoogleSignInAccount? googleUser = await _googleSignIn.signInSilently();
+      if (googleUser == null) return null;
 
-      // Uygulamaya kullanıcı objesini döndür
-      return AppUser(
-          uid: uid,
-          displayName: displayName,
-          photoURL: photoURL,
-          email: email
+      final GoogleSignInAuthentication googleAuth = await googleUser.authentication;
+
+      final credential = GoogleAuthProvider.credential(
+        accessToken: googleAuth.accessToken,
+        idToken: googleAuth.idToken,
       );
+
+      final userCredential = await _auth.signInWithCredential(credential);
+
+      // Restore sonrası da aynı sync adımlarını uygula (firestore + prefs + device list)
+      final prefs = await SharedPreferences.getInstance();
+      final u = userCredential.user;
+      if (u != null) {
+        await _postAuthSync(u, prefs: prefs);
+      }
+      return u;
+    } catch (e) {
+      print('Silent Sign-In Error: $e');
+      return null;
+    }
+  }
+
+  Future<AppUser> _postAuthSync(User firebaseUser, {required SharedPreferences prefs}) async {
+    final uid = firebaseUser.uid;
+    final email = firebaseUser.email;
+    final displayName = firebaseUser.displayName;
+    final photoURL = firebaseUser.photoURL;
+
+    // “Bu cihazda bir zamanlar login olmuştu” bilgisini sakla
+    await prefs.setString('user_uid', uid);
+
+    // Firestore’da profil bilgilerini güncelle (merge ile)
+    try {
+      await _firestore.collection('users').doc(uid).set({
+        'email': email,
+        'displayName': displayName ?? '',
+        'photoURL': photoURL ?? '',
+        'lastLogin': FieldValue.serverTimestamp(),
+      }, SetOptions(merge: true));
+    } catch (e) {
+      print('Firestore update error: $e');
     }
 
-    return null;
+    // Device list sync (email yoksa atla)
+    if (email != null) {
+      await _dbService.updateUserDeviceList(uid, email);
+    }
+
+    return AppUser(
+      uid: uid,
+      displayName: displayName,
+      photoURL: photoURL,
+      email: email,
+    );
   }
 
   Future<void> signOut() async {

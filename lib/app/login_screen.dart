@@ -30,7 +30,6 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
       vsync: this,
     );
 
-    // Animasyon eğrileri
     const curve = Curves.easeOutCubic;
 
     _fadeAnimation = Tween<double>(begin: 0.0, end: 1.0).animate(
@@ -46,14 +45,7 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    // 120HZ İÇİN KRİTİK: Resimleri önbelleğe alıyoruz.
-    // Böylece animasyon oynarken resim yüklemeye çalışıp takılma yapmaz.
-
-    // Uygulama ikonu
     precacheImage(const AssetImage('assets/icon.png'), context);
-
-    // Google Logosu (Lütfen assets klasörüne 'google_logo.png' ekleyin)
-    // Eğer dosyanız yoksa bu satırı yorum satırı yapın.
     try {
       precacheImage(const AssetImage('assets/google_logo.png'), context);
     } catch (_) {}
@@ -72,29 +64,25 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
       final user = await _authService.getOrCreateUser();
 
       if (user != null && mounted) {
-        // 1. Önce listeleri güncelle (Davetiyeler vs. için)
+        // Cihazı var mı kontrol et?
         final dbService = DatabaseService();
-        await dbService.updateUserDeviceList(user.uid, user.email!);
+        final hasDevice = await dbService.hasAnyAssociatedDevice(user.uid);
 
-        // 2. Hiç cihazı var mı kontrol et?
-        bool hasDevice = await dbService.hasAnyAssociatedDevice(user.uid);
+        if (!mounted) return;
 
-        if (mounted) {
-          if (hasDevice) {
-            // Cihazı var -> Ana Ekrana
-            Navigator.of(context).pushReplacement(
-              MaterialPageRoute(builder: (context) => const MainHub()),
-            );
-          } else {
-            // Cihazı yok -> Kurulum Ekranına (ONBOARDING MODUNDA)
-            Navigator.of(context).pushReplacement(
-              MaterialPageRoute(builder: (context) => const SyncScreen(isOnboarding: true)),
-            );
-          }
+        if (hasDevice) {
+          Navigator.of(context).pushReplacement(
+            MaterialPageRoute(builder: (context) => const MainHub()),
+          );
+        } else {
+          Navigator.of(context).pushReplacement(
+            MaterialPageRoute(builder: (context) => const SyncScreen(isOnboarding: true)),
+          );
         }
-      } else {
-        if (mounted) setState(() => _isLoading = false);
+        return;
       }
+
+      if (mounted) setState(() => _isLoading = false);
     } catch (e) {
       if (mounted) {
         setState(() => _isLoading = false);
@@ -112,10 +100,7 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
       body: Stack(
         fit: StackFit.expand,
         children: [
-          // --- GPU DOSTU ARKA PLAN ---
-          // RepaintBoundary ile arka planı "donduruyoruz", GPU tekrar tekrar çizmiyor.
           const RepaintBoundary(child: _LoginBackground()),
-
           SafeArea(
             child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 24.0),
@@ -123,8 +108,6 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
                   const Spacer(),
-
-                  // --- LOGO ve BAŞLIK ---
                   FadeTransition(
                     opacity: _fadeAnimation,
                     child: SlideTransition(
@@ -132,7 +115,6 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
                       child: Column(
                         children: [
                           Container(
-                            // Logoyu sınırla ki çok büyük görünmesin
                             height: 100,
                             decoration: BoxDecoration(
                               shape: BoxShape.circle,
@@ -148,7 +130,11 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
                               'assets/icon.png',
                               fit: BoxFit.contain,
                               gaplessPlayback: true,
-                              errorBuilder: (c,o,s) => const Icon(Icons.health_and_safety, size: 80, color: AppColors.skyBlue),
+                              errorBuilder: (c, o, s) => const Icon(
+                                Icons.health_and_safety,
+                                size: 80,
+                                color: AppColors.skyBlue,
+                              ),
                             ),
                           ),
                           const SizedBox(height: 32),
@@ -174,10 +160,7 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
                       ),
                     ),
                   ),
-
                   const SizedBox(height: 48),
-
-                  // --- GOOGLE BUTONU ---
                   FadeTransition(
                     opacity: _fadeAnimation,
                     child: SlideTransition(
@@ -187,10 +170,7 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
                           : _GoogleButton(onTap: _handleGoogleSignIn),
                     ),
                   ),
-
                   const Spacer(),
-
-                  // --- ALT BİLGİ ---
                   FadeTransition(
                     opacity: _fadeAnimation,
                     child: Padding(
@@ -198,9 +178,9 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
                       child: Text(
                         "MedTrack Security",
                         style: GoogleFonts.inter(
-                            fontSize: 12,
-                            color: Colors.blueGrey.shade300,
-                            fontWeight: FontWeight.w500
+                          fontSize: 12,
+                          color: Colors.blueGrey.shade300,
+                          fontWeight: FontWeight.w500,
                         ),
                       ),
                     ),
@@ -215,7 +195,6 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
   }
 }
 
-// --- ARKA PLAN WIDGET ---
 class _LoginBackground extends StatelessWidget {
   const _LoginBackground();
 
@@ -231,7 +210,6 @@ class _LoginBackground extends StatelessWidget {
             height: 300,
             decoration: BoxDecoration(
               shape: BoxShape.circle,
-              // Blur yerine Gradient kullanımı (Performans artışı)
               gradient: RadialGradient(
                 colors: [
                   AppColors.turquoise.withOpacity(0.15),
@@ -265,7 +243,6 @@ class _LoginBackground extends StatelessWidget {
   }
 }
 
-// --- GOOGLE BUTONU (Asset Kullanımlı) ---
 class _GoogleButton extends StatelessWidget {
   final VoidCallback onTap;
   const _GoogleButton({required this.onTap});
@@ -295,20 +272,15 @@ class _GoogleButton extends StatelessWidget {
           child: Row(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              // 1. Assets klasörüne 'google_logo.png' attığınızdan emin olun.
-              // 2. Eğer dosya yoksa, geçici olarak aşağıdaki Icon'u açabilirsiniz.
               Image.asset(
-                'assets/google_logo.png', // Buraya kendi dosyanızı koyun
+                'assets/google_logo.png',
                 height: 24,
                 width: 24,
                 errorBuilder: (context, error, stackTrace) {
-                  // Dosya bulunamazsa yedek ikon göster
                   return const Icon(Icons.g_mobiledata, size: 36, color: Colors.red);
                 },
               ),
-
               const SizedBox(width: 12),
-
               Text(
                 "google_sign_in".tr(),
                 style: GoogleFonts.inter(

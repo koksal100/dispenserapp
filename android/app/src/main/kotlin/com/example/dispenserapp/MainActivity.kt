@@ -1,8 +1,5 @@
-package com.example.dispenserapp // <-- KENDİ PAKET İSMİNİZ!
+package com.example.dispenserapp // Kendi paket isminle aynı olduğundan emin ol!
 
-import android.app.KeyguardManager
-import android.content.Context
-import android.content.Intent
 import android.os.Build
 import android.os.Bundle
 import android.view.WindowManager
@@ -11,58 +8,62 @@ import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
 
 class MainActivity: FlutterActivity() {
-    private val CHANNEL = "com.example.dispenserapp/lock_check"
+    private val CHANNEL = "com.example.dispenserapp/lock_control"
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        // İlk açılışta kilit ekranı ayarlarını yap
-        configureLockScreen()
-    }
 
-    // Uygulama arka plandayken alarm çalarsa burası çalışır
-    override fun onNewIntent(intent: Intent) {
-        super.onNewIntent(intent)
-        setIntent(intent)
-        // TEKRAR ÇAĞIRMAMIZ LAZIM: "Ben hala kilit ekranı üzerinde görünmek istiyorum"
-        configureLockScreen()
-    }
-
-    private fun configureLockScreen() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
-            // SADECE GÖSTER VE EKRANI AÇ. (KİLİDİ AÇMA EMRİ VERME!)
-            setShowWhenLocked(true)
-            setTurnScreenOn(true)
-
-            // KeyguardManager.requestDismissKeyguard() BURADA ASLA ÇAĞRILMAMALI
-            // Eğer çağrılırsa direkt şifre ekranı gelir.
-        } else {
-            // Eski cihazlar için
-            window.addFlags(
-                WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED or
-                        WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON or
-                        WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON
-            )
-        }
+        // KRİTİK NOKTA: Uygulama ilk açıldığında kilit ekranında gözükme özelliğini
+        // GEÇİCİ OLARAK KAPATIYORUZ. Böylece güvenlik açığı oluşmuyor.
+        disableShowWhenLocked()
     }
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
 
+        // Flutter'dan gelen emirleri dinliyoruz
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHANNEL).setMethodCallHandler { call, result ->
-            if (call.method == "isDeviceLocked") {
-                val keyguardManager = getSystemService(Context.KEYGUARD_SERVICE) as KeyguardManager
-                result.success(keyguardManager.isKeyguardLocked)
-            }
-            else if (call.method == "bringToFront") {
-                val intent = Intent(this, MainActivity::class.java)
-                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                intent.addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP)
-                startActivity(intent)
-                result.success(null)
-            }
-            else {
-                result.notImplemented()
+            when (call.method) {
+                "showOnLockScreen" -> {
+                    // Alarm çalıyor! İzni AÇ.
+                    enableShowWhenLocked()
+                    result.success(null)
+                }
+                "hideFromLockScreen" -> {
+                    // Alarm durdu! İzni KAPAT.
+                    disableShowWhenLocked()
+                    result.success(null)
+                }
+                else -> result.notImplemented()
             }
         }
+    }
+
+    private fun enableShowWhenLocked() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
+            setShowWhenLocked(true)
+            setTurnScreenOn(true)
+        }
+        // Eski cihazlar ve ekstra garanti için flagler
+        window.addFlags(
+            WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON or
+                    WindowManager.LayoutParams.FLAG_ALLOW_LOCK_WHILE_SCREEN_ON or
+                    WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED or
+                    WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON
+        )
+    }
+
+    private fun disableShowWhenLocked() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
+            setShowWhenLocked(false)
+            setTurnScreenOn(false)
+        }
+        // Flagleri temizle
+        window.clearFlags(
+            WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON or
+                    WindowManager.LayoutParams.FLAG_ALLOW_LOCK_WHILE_SCREEN_ON or
+                    WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED or
+                    WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON
+        )
     }
 }

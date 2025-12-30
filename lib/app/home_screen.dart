@@ -1,602 +1,781 @@
+import 'dart:async'; // StreamSubscription için
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:dispenserapp/services/auth_service.dart';
 import 'package:dispenserapp/services/notification_service.dart';
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart'; // Status Bar için
 import 'package:dispenserapp/widgets/circular_selector.dart';
 import 'package:dispenserapp/services/database_service.dart';
-import 'package:firebase_auth/firebase_auth.dart';
+import 'package:dispenserapp/main.dart'; // AppColors
+import 'package:shared_preferences/shared_preferences.dart'; // İpucu kaydı için
 
 class HomeScreen extends StatefulWidget {
   final String macAddress;
-
   const HomeScreen({super.key, required this.macAddress});
 
   @override
   State<HomeScreen> createState() => _HomeScreenState();
 }
 
-class _HomeScreenState extends State<HomeScreen> {
+class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   final GlobalKey<CircularSelectorState> _circularSelectorKey = GlobalKey<CircularSelectorState>();
   final DatabaseService _databaseService = DatabaseService();
   final NotificationService _notificationService = NotificationService();
   final AuthService _authService = AuthService();
 
-  // STRUCTURE: 'times': List<TimeOfDay>
   List<Map<String, dynamic>> _sections = [];
   bool _isLoading = true;
   bool _isRinging = false;
-
   DeviceRole _currentRole = DeviceRole.readOnly;
-  String? _currentUserEmail;
+
+  // İpucu görünürlük kontrolü
+  bool _showHint = true;
+
+  late AnimationController _fadeController;
+
+  // --- SENKRONİZASYON İÇİN STREAM ---
+  StreamSubscription<DocumentSnapshot>? _deviceSubscription;
 
   @override
   void initState() {
     super.initState();
+    _fadeController = AnimationController(vsync: this, duration: const Duration(milliseconds: 800));
     _initData();
+    _checkHintStatus();
+  }
+
+  @override
+  void dispose() {
+    _deviceSubscription?.cancel();
+    _fadeController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _checkHintStatus() async {
+    final prefs = await SharedPreferences.getInstance();
+    if (mounted) {
+      setState(() {
+        _showHint = !(prefs.getBool('has_seen_wheel_hint') ?? false);
+      });
+    }
+  }
+
+  // --- KRİTİK DÜZELTME: UI Thread'i bloklamayan hızlı kapatma ---
+  void _dismissHint() {
+    if (!_showHint) return;
+
+    // 1. UI'ı ANINDA güncelle (Await yok, bekleme yok)
+    setState(() {
+      _showHint = false;
+    });
+
+    // 2. Kayıt işlemini arka planda yap (Fire-and-forget)
+    SharedPreferences.getInstance().then((prefs) {
+      prefs.setBool('has_seen_wheel_hint', true);
+    });
   }
 
   Future<void> _initData() async {
+    if (!mounted) return;
+
     setState(() => _isLoading = true);
+
     final user = await _authService.getOrCreateUser();
     if (user != null) {
-      _currentUserEmail = user.email;
       _currentRole = await _databaseService.getUserRole(widget.macAddress, user.email);
     }
-    await _loadSections();
-    if (mounted) setState(() => _isLoading = false);
+
+    _deviceSubscription = FirebaseFirestore.instance
+        .collection('dispenser')
+        .doc(widget.macAddress)
+        .snapshots()
+        .listen((doc) {
+      if (mounted && doc.exists && doc.data() != null) {
+        _processData(doc.data()!);
+      }
+    }, onError: (e) {
+      debugPrint("Stream Hatası: $e");
+      if (mounted) setState(() => _isLoading = false);
+    });
   }
 
-  // --- MULTI-TIME SUPPORTED LOADING ---
-  Future<void> _loadSections() async {
-    try {
-      final doc = await FirebaseFirestore.instance.collection('dispenser').doc(widget.macAddress).get();
-      if (!mounted) return;
-
-      bool dataIsValid = false;
-
-      if (doc.exists && doc.data()!.containsKey('section_config')) {
-        final List<dynamic> configData = doc.data()!['section_config'];
-
-        if (configData.length == 3) {
-          dataIsValid = true;
-          _sections = configData.map((item) {
-            final Map<String, dynamic> section = item as Map<String, dynamic>;
-            final bool isActive = section['isActive'] ?? false;
-
-            // NEW FORMAT: Check for 'schedule' list
-            List<TimeOfDay> times = [];
-            if (section.containsKey('schedule')) {
-              // New format: [{h:8, m:0}, {h:12, m:0}]
-              times = (section['schedule'] as List).map((t) {
-                return TimeOfDay(hour: t['h'], minute: t['m']);
-              }).toList();
-            } else {
-              // Old format fallback
-              if (isActive) {
-                times.add(TimeOfDay(hour: section['hour'] ?? 8, minute: section['minute'] ?? 0));
-              }
-            }
-
-            // If active but no times, add default
-            if (times.isEmpty && isActive) {
-              times.add(const TimeOfDay(hour: 8, minute: 0));
-            }
-
-            return {
-              'name': section['name'],
-              'times': times,
-              'isActive': isActive,
-            };
-          }).toList();
-        }
-      }
-
-      // Reset if data is invalid or missing
-      if (!dataIsValid) {
-        _sections = List.generate(3, (index) {
-          return {
+  void _processData(Map<String, dynamic> data) {
+    if (!data.containsKey('section_config')) {
+      if (mounted) {
+        setState(() {
+          _sections = List.generate(3, (index) => {
             'name': 'medicine_default_name'.tr(args: [(index + 1).toString()]),
             'times': [TimeOfDay(hour: (8 + 5 * index) % 24, minute: 0)],
             'isActive': true,
-          };
+          });
+          _isLoading = false;
         });
+        _fadeController.forward();
+      }
+      return;
+    }
 
-        if (_canEdit()) {
-          await _saveSectionConfig();
-        }
+    final List<dynamic> configData = data['section_config'];
+
+    final List<Map<String, dynamic>> newSections = configData.map((item) {
+      final Map<String, dynamic> section = item as Map<String, dynamic>;
+      List<TimeOfDay> times = [];
+
+      if (section.containsKey('schedule')) {
+        times = (section['schedule'] as List).map((t) => TimeOfDay(hour: t['h'], minute: t['m'])).toList();
+      } else if (section['isActive'] == true) {
+        times.add(TimeOfDay(hour: section['hour'] ?? 8, minute: section['minute'] ?? 0));
       }
 
-      // --- FIXED: Added context parameter ---
-      if (mounted) {
-        await _notificationService.scheduleMedicationNotifications(context, _sections);
+      if (times.isEmpty && section['isActive'] == true) {
+        times.add(const TimeOfDay(hour: 8, minute: 0));
       }
 
-    } catch (e) {
-      print("Error loading sections: $e");
+      return {
+        'name': section['name'] ?? 'medicine_default_name'.tr(),
+        'times': times,
+        'isActive': section['isActive'] ?? false,
+      };
+    }).toList();
+
+    if (mounted) {
+      setState(() {
+        _sections = newSections;
+        _isLoading = false;
+      });
+      _fadeController.forward();
+      _notificationService.scheduleMedicationNotifications(context, _sections);
     }
   }
 
-  // --- MULTI-TIME SUPPORTED SAVING ---
   Future<void> _saveSectionConfig() async {
     if (!_canEdit()) return;
 
     final List<Map<String, dynamic>> serializableList = _sections.map((section) {
       final List<TimeOfDay> times = section['times'] as List<TimeOfDay>;
-
       return {
         'name': section['name'],
-        'isActive': section['isActive'] ?? false,
+        'isActive': section['isActive'],
         'schedule': times.map((t) => {'h': t.hour, 'm': t.minute}).toList(),
-        // Legacy support fields
         'hour': times.isNotEmpty ? times.first.hour : 0,
         'minute': times.isNotEmpty ? times.first.minute : 0,
       };
     }).toList();
 
     await _databaseService.saveSectionConfig(widget.macAddress, serializableList);
-
-    // --- FIXED: Added context parameter ---
-    if (mounted) {
-      await _notificationService.scheduleMedicationNotifications(context, _sections);
-    }
-  }
-
-  void _updateSection(int index, Map<String, dynamic> data) {
-    if (!_canEdit()) {
-      _showReadOnlyWarning();
-      return;
-    }
-
-    setState(() {
-      _sections[index].addAll(data);
-      _sections[index]['isActive'] = true;
-    });
-    _saveSectionConfig();
   }
 
   Future<void> _handleBuzzer() async {
-    setState(() => _isRinging = !_isRinging);
-    await _databaseService.toggleBuzzer(widget.macAddress, _isRinging);
-    if (_isRinging) {
-      Future.delayed(const Duration(seconds: 3), () async {
-        if (mounted && _isRinging) {
-          setState(() => _isRinging = false);
-          await _databaseService.toggleBuzzer(widget.macAddress, false);
-        }
-      });
+    if (!mounted) return;
+    try {
+      bool targetState = !_isRinging;
+      setState(() => _isRinging = targetState);
+
+      await _databaseService.toggleBuzzer(widget.macAddress, targetState);
+
+      if (targetState) {
+        Future.delayed(const Duration(seconds: 3), () async {
+          if (mounted && _isRinging) {
+            setState(() => _isRinging = false);
+            await _databaseService.toggleBuzzer(widget.macAddress, false);
+          }
+        });
+      }
+    } catch (e) {
+      debugPrint("Buzzer error: $e");
     }
   }
 
   bool _canEdit() => _currentRole == DeviceRole.owner || _currentRole == DeviceRole.secondary;
 
-  void _showReadOnlyWarning() {
+  void _showSuccessSnackbar() {
+    if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text("read_only_warning".tr()), backgroundColor: Colors.orange, duration: const Duration(seconds: 2)),
+      SnackBar(
+        elevation: 0,
+        behavior: SnackBarBehavior.floating,
+        backgroundColor: Colors.transparent,
+        content: Container(
+          padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
+          decoration: BoxDecoration(
+            color: AppColors.deepSea.withOpacity(0.9),
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(color: Colors.white.withOpacity(0.1)),
+            boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.2), blurRadius: 10, offset: const Offset(0, 4))],
+          ),
+          child: Row(
+            children: [
+              const Icon(Icons.check_circle_rounded, color: AppColors.skyBlue, size: 22),
+              const SizedBox(width: 12),
+              Text("alarm_settings_saved".tr(), style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+            ],
+          ),
+        ),
+      ),
     );
   }
 
-  // --- USER MANAGEMENT DIALOG ---
-  void _showUserManagementDialog() {
-    final TextEditingController emailController = TextEditingController();
-
+  void _showInfoDialog(String title, String content) {
     showDialog(
       context: context,
-      builder: (context) {
-        return StreamBuilder<DocumentSnapshot>(
-          stream: FirebaseFirestore.instance.collection('dispenser').doc(widget.macAddress).snapshots(),
-          builder: (context, snapshot) {
-            if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
-
-            final data = snapshot.data!.data() as Map<String, dynamic>;
-            final readOnlyUsers = List<String>.from(data['read_only_mails'] ?? []);
-            final secondaryUsers = List<String>.from(data['secondary_mails'] ?? []);
-
-            return AlertDialog(
-              title: Text("access_management_title".tr()),
-              content: SizedBox(
-                width: double.maxFinite,
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Row(
-                      children: [
-                        Expanded(
-                          child: TextField(
-                            controller: emailController,
-                            decoration: InputDecoration(
-                              hintText: "user_email_hint".tr(),
-                              labelText: "grant_access".tr(),
-                              border: const OutlineInputBorder(),
-                              contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 0),
-                            ),
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        IconButton(
-                          style: IconButton.styleFrom(backgroundColor: Colors.green.shade50),
-                          icon: const Icon(Icons.person_add, color: Colors.green),
-                          tooltip: "add".tr(),
-                          onPressed: () {
-                            final mail = emailController.text.trim();
-                            if (mail.isNotEmpty) {
-                              _databaseService.addReadOnlyUser(widget.macAddress, mail);
-                              emailController.clear();
-                            }
-                          },
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 16),
-                    const Divider(),
-                    Padding(
-                      padding: const EdgeInsets.symmetric(vertical: 8.0),
-                      child: Align(
-                        alignment: Alignment.centerLeft,
-                        child: Text("user_list_title".tr(), style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.grey)),
-                      ),
-                    ),
-                    Flexible(
-                      child: ListView(
-                        shrinkWrap: true,
-                        children: [
-                          if (readOnlyUsers.isEmpty && secondaryUsers.isEmpty)
-                            Padding(
-                              padding: const EdgeInsets.all(8.0),
-                              child: Text("no_users_yet".tr(), style: const TextStyle(fontStyle: FontStyle.italic)),
-                            ),
-                          ...readOnlyUsers.map((email) => Card(
-                            margin: const EdgeInsets.symmetric(vertical: 4),
-                            child: ListTile(
-                              dense: true,
-                              contentPadding: const EdgeInsets.symmetric(horizontal: 8),
-                              leading: const Icon(Icons.remove_red_eye, color: Colors.grey),
-                              title: Text(email, style: const TextStyle(fontSize: 13)),
-                              subtitle: Text("viewer".tr()),
-                              trailing: Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  IconButton(
-                                    icon: const Icon(Icons.arrow_upward_rounded, color: Colors.green),
-                                    tooltip: "promote_admin".tr(),
-                                    onPressed: () async {
-                                      await _databaseService.promoteToSecondary(widget.macAddress, email);
-                                    },
-                                  ),
-                                  IconButton(
-                                    icon: const Icon(Icons.delete_outline, color: Colors.red),
-                                    tooltip: "delete".tr(),
-                                    onPressed: () async {
-                                      await _databaseService.removeUser(widget.macAddress, email);
-                                    },
-                                  ),
-                                ],
-                              ),
-                            ),
-                          )),
-                          ...secondaryUsers.map((email) => Card(
-                            margin: const EdgeInsets.symmetric(vertical: 4),
-                            color: Colors.blue.shade50,
-                            child: ListTile(
-                              dense: true,
-                              contentPadding: const EdgeInsets.symmetric(horizontal: 8),
-                              leading: const Icon(Icons.verified_user, color: Colors.blue),
-                              title: Text(email, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold)),
-                              subtitle: Text("admin".tr()),
-                              trailing: Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  IconButton(
-                                    icon: const Icon(Icons.arrow_downward_rounded, color: Colors.orange),
-                                    tooltip: "demote_viewer".tr(),
-                                    onPressed: () async {
-                                      await _databaseService.demoteToReadOnly(widget.macAddress, email);
-                                    },
-                                  ),
-                                  IconButton(
-                                    icon: const Icon(Icons.delete_outline, color: Colors.red),
-                                    tooltip: "delete".tr(),
-                                    onPressed: () async {
-                                      await _databaseService.removeUser(widget.macAddress, email);
-                                    },
-                                  ),
-                                ],
-                              ),
-                            ),
-                          )),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              actions: [
-                TextButton(
-                  onPressed: () => Navigator.of(context).pop(),
-                  child: Text("close".tr()),
-                ),
-              ],
-            );
-          },
-        );
-      },
-    );
-  }
-
-  // --- ALARM SETTINGS DIALOG ---
-  Future<void> _showNotificationSettingsDialog() async {
-    final settings = await _notificationService.getNotificationSettings();
-    bool notificationsEnabled = settings['enabled'];
-    int offset = settings['offset'];
-
-    await showDialog(
-      context: context,
-      builder: (context) {
-        return StatefulBuilder(
-          builder: (context, setStateInDialog) {
-            return AlertDialog(
-              title: Text("alarm_settings_title".tr()),
-              content: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  if (!_canEdit())
-                    Padding(
-                      padding: const EdgeInsets.only(bottom: 12.0),
-                      child: Text(
-                        "alarm_settings_note".tr(),
-                        style: const TextStyle(fontSize: 12, color: Colors.orange, fontStyle: FontStyle.italic),
-                      ),
-                    ),
-                  SwitchListTile(
-                    title: Text("enable_alarms".tr()),
-                    value: notificationsEnabled,
-                    onChanged: (value) {
-                      setStateInDialog(() {
-                        notificationsEnabled = value;
-                      });
-                    },
-                  ),
-                  const SizedBox(height: 16),
-                  Text("alarm_offset_label".tr()),
-                  DropdownButton<int>(
-                    value: offset,
-                    items: [0, 5, 10, 15, 30].map<DropdownMenuItem<int>>((int value) {
-                      return DropdownMenuItem<int>(
-                        value: value,
-                        child: Text(value == 0 ? "exact_time".tr() : "minutes_before".tr(args: [value.toString()])),
-                      );
-                    }).toList(),
-                    onChanged: notificationsEnabled
-                        ? (int? newValue) {
-                      setStateInDialog(() {
-                        offset = newValue!;
-                      });
-                    }
-                        : null,
-                  ),
-                ],
-              ),
-              actions: [
-                TextButton(
-                  onPressed: () => Navigator.of(context).pop(),
-                  child: Text("cancel".tr()),
-                ),
-                ElevatedButton(
-                  onPressed: () async {
-                    await _notificationService.saveNotificationSettings(
-                      enabled: notificationsEnabled,
-                      offset: offset,
-                    );
-
-                    // --- FIXED: Added context parameter ---
-                    if (mounted) {
-                      await _notificationService.scheduleMedicationNotifications(context, _sections);
-                    }
-
-                    if (mounted) {
-                      Navigator.of(context).pop();
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(content: Text("alarm_settings_saved".tr())),
-                      );
-                    }
-                  },
-                  child: Text("save".tr()),
-                ),
-              ],
-            );
-          },
-        );
-      },
+      builder: (context) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+        title: Row(
+          children: [
+            const Icon(Icons.info_outline_rounded, color: AppColors.skyBlue),
+            const SizedBox(width: 10),
+            Text(title, style: const TextStyle(fontWeight: FontWeight.bold, color: AppColors.deepSea, fontSize: 18)),
+          ],
+        ),
+        content: Text(content, style: const TextStyle(height: 1.5, fontSize: 15)),
+        actions: [TextButton(onPressed: () => Navigator.pop(context), child: Text("close".tr()))],
+      ),
     );
   }
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final colorScheme = theme.colorScheme;
     final isReadOnly = !_canEdit();
 
     return Scaffold(
+      backgroundColor: AppColors.background,
       appBar: AppBar(
-        title: Text("device_settings_title".tr()),
-        actions: [
-          if (_currentRole == DeviceRole.owner)
-            IconButton(
-              icon: const Icon(Icons.manage_accounts_rounded),
-              tooltip: "access_management_title".tr(),
-              onPressed: _showUserManagementDialog,
-            ),
-          IconButton(
-            icon: const Icon(Icons.alarm_add_rounded, size: 30),
-            tooltip: "alarm_settings_title".tr(),
-            onPressed: _showNotificationSettingsDialog,
-          ),
-          const SizedBox(width: 8),
-        ],
+        systemOverlayStyle: const SystemUiOverlayStyle(
+          statusBarColor: Colors.transparent,
+          statusBarIconBrightness: Brightness.dark,
+          statusBarBrightness: Brightness.light,
+        ),
+        title: Text("device_settings_title".tr(), style: const TextStyle(fontWeight: FontWeight.w900, color: AppColors.deepSea)),
+        centerTitle: true,
+        backgroundColor: Colors.transparent,
+        elevation: 0,
+        iconTheme: const IconThemeData(color: AppColors.deepSea),
       ),
       body: _isLoading
           ? const Center(child: CircularProgressIndicator())
-          : SingleChildScrollView(
-        child: Padding(
-          padding: const EdgeInsets.all(16.0),
+          : FadeTransition(
+        opacity: _fadeController,
+        child: SingleChildScrollView(
+          physics: const BouncingScrollPhysics(),
+          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
           child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: <Widget>[
-              if (isReadOnly)
-                Container(
-                  padding: const EdgeInsets.all(12),
-                  margin: const EdgeInsets.only(bottom: 20),
-                  decoration: BoxDecoration(color: Colors.orange.shade50, borderRadius: BorderRadius.circular(12), border: Border.all(color: Colors.orange.shade200)),
-                  child: Row(children: [const Icon(Icons.lock_outline, color: Colors.orange), const SizedBox(width: 12), Expanded(child: Text("read_only_banner".tr(), style: theme.textTheme.bodySmall?.copyWith(color: Colors.orange.shade900, fontWeight: FontWeight.w600)))]),
+            children: [
+              _buildQuickActionButtons(),
+              const SizedBox(height: 16),
+
+              // --- DÜZELTME: Smooth Slide-Up Animasyonu ---
+              // AnimatedSize sayesinde içerik (ipucu) gizlenince
+              // kapladığı alan animasyonla küçülür, altındakiler yukarı kayar.
+              AnimatedSize(
+                duration: const Duration(milliseconds: 500),
+                curve: Curves.easeOutQuart,
+                child: _showHint
+                    ? Column(
+                  children: [
+                    _buildStatusHeader(isReadOnly),
+                    const SizedBox(height: 30),
+                  ],
                 )
-              else
-                Card(
-                  color: colorScheme.primaryContainer.withOpacity(0.6),
-                  margin: const EdgeInsets.only(bottom: 30),
-                  child: Padding(padding: const EdgeInsets.all(20.0), child: Row(children: [Icon(Icons.tips_and_updates_outlined, color: colorScheme.onPrimaryContainer, size: 28), const SizedBox(width: 15), Expanded(child: Text("home_hint_text".tr(), style: theme.textTheme.bodyLarge?.copyWith(color: colorScheme.onPrimaryContainer, fontWeight: FontWeight.w500)))])),
-                ),
-
-              Center(
-                child: Container(
-                  height: MediaQuery.of(context).size.width * 0.85,
-                  width: MediaQuery.of(context).size.width * 0.85,
-                  decoration: BoxDecoration(color: colorScheme.surface, shape: BoxShape.circle, boxShadow: [BoxShadow(color: colorScheme.primary.withOpacity(0.15), spreadRadius: 5, blurRadius: 20)]),
-                  child: AbsorbPointer(
-                    absorbing: isReadOnly,
-                    child: CircularSelector(key: _circularSelectorKey, sections: _sections, onUpdate: _updateSection),
-                  ),
-                ),
+                    : const SizedBox.shrink(),
               ),
 
-              const SizedBox(height: 30),
+              // İpucu kapandığında boşluk dengesi için ufak bir statik boşluk
+              if (!_showHint) const SizedBox(height: 15),
 
-              if (!isReadOnly)
-                Padding(
-                  padding: const EdgeInsets.only(bottom: 20.0),
-                  child: Center(
-                    child: SizedBox(
-                      width: 220, height: 50,
-                      child: ElevatedButton.icon(
-                        onPressed: _handleBuzzer,
-                        style: ElevatedButton.styleFrom(backgroundColor: _isRinging ? Colors.red : colorScheme.primary, foregroundColor: Colors.white, elevation: 4),
-                        icon: Icon(_isRinging ? Icons.stop_circle_outlined : Icons.wifi_tethering),
-                        label: Text(_isRinging ? "stop_sound".tr() : "find_device".tr(), style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-                      ),
-                    ),
-                  ),
-                ),
+              _buildCircularSelector(isReadOnly),
+              const SizedBox(height: 40),
 
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 8.0),
-                child: Text("scheduled_meds_title".tr(), style: theme.textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.bold)),
-              ),
+              if (!isReadOnly) _buildBuzzerButton(),
+              const SizedBox(height: 35),
+
+              _buildSectionHeader(),
               const SizedBox(height: 15),
 
-              // --- SCHEDULED MEDICATIONS LIST ---
-              ..._sections.asMap().entries.map((entry) {
-                int index = entry.key;
-                Map<String, dynamic> section = entry.value;
-                List<TimeOfDay> times = section['times'] as List<TimeOfDay>;
-                bool isActive = section['isActive'] ?? false;
+              ..._sections.asMap().entries.map((e) => _buildMedicineCard(e.key, e.value, isReadOnly, theme)).toList(),
 
-                times.sort((a, b) => (a.hour * 60 + a.minute).compareTo(b.hour * 60 + b.minute));
-
-                return Card(
-                  margin: const EdgeInsets.symmetric(vertical: 7),
-                  child: Padding(
-                    padding: const EdgeInsets.all(12.0),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Row(
-                          children: [
-                            CircleAvatar(
-                              backgroundColor: isReadOnly ? Colors.grey.shade200 : colorScheme.primary.withOpacity(0.1),
-                              child: Icon(Icons.medication_liquid_rounded, color: isReadOnly ? Colors.grey : colorScheme.primary, size: 28),
-                            ),
-                            const SizedBox(width: 16),
-                            Expanded(
-                              child: Text(
-                                section['name'],
-                                style: theme.textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold, fontSize: 19),
-                              ),
-                            ),
-
-                            if (!isReadOnly) ...[
-                              IconButton(
-                                icon: const Icon(Icons.edit_outlined),
-                                tooltip: "edit".tr(),
-                                onPressed: () {
-                                  _circularSelectorKey.currentState?.showEditDialog(index);
-                                },
-                              ),
-                              Switch(
-                                value: isActive,
-                                onChanged: (bool value) {
-                                  setState(() {
-                                    _sections[index]['isActive'] = value;
-                                  });
-                                  _saveSectionConfig();
-                                },
-                                activeColor: colorScheme.primary,
-                              ),
-                            ] else
-                              Tooltip(
-                                message: "no_permission".tr(),
-                                child: const Icon(Icons.lock, color: Colors.grey),
-                              ),
-                          ],
-                        ),
-                        const SizedBox(height: 12),
-
-                        if (!isActive)
-                          Padding(
-                            padding: const EdgeInsets.only(left: 56.0),
-                            child: Text("passive".tr(), style: TextStyle(color: Colors.grey.shade500, fontStyle: FontStyle.italic)),
-                          )
-                        else if (times.isEmpty)
-                          Padding(
-                            padding: const EdgeInsets.only(left: 56.0),
-                            child: Text("no_times_added".tr(), style: TextStyle(color: Colors.orange.shade300)),
-                          )
-                        else
-                          Padding(
-                            padding: const EdgeInsets.only(left: 56.0),
-                            child: Wrap(
-                              spacing: 8,
-                              runSpacing: 4,
-                              children: times.map((t) {
-                                return Container(
-                                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                                  decoration: BoxDecoration(
-                                    color: colorScheme.primary.withOpacity(0.08),
-                                    borderRadius: BorderRadius.circular(8),
-                                    border: Border.all(color: colorScheme.primary.withOpacity(0.2)),
-                                  ),
-                                  child: Row(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      Icon(Icons.access_time, size: 14, color: colorScheme.primary),
-                                      const SizedBox(width: 4),
-                                      Text(
-                                        t.format(context),
-                                        style: TextStyle(fontWeight: FontWeight.bold, color: colorScheme.primary, fontSize: 13),
-                                      ),
-                                    ],
-                                  ),
-                                );
-                              }).toList(),
-                            ),
-                          )
-                      ],
-                    ),
-                  ),
-                );
-              }).toList(),
+              const SizedBox(height: 40),
             ],
           ),
         ),
       ),
+    );
+  }
+
+  Widget _buildSectionHeader() {
+    return Align(
+      alignment: Alignment.centerLeft,
+      child: Padding(
+        padding: const EdgeInsets.only(left: 4),
+        child: Text(
+            "scheduled_meds_title",
+            style: const TextStyle(fontWeight: FontWeight.w900, color: AppColors.deepSea, fontSize: 17)
+        ).tr(),
+      ),
+    );
+  }
+
+  Widget _buildQuickActionButtons() {
+    return Row(
+      children: [
+        if (_currentRole == DeviceRole.owner)
+          Expanded(
+            child: _buildSmallActionButton(
+              icon: Icons.manage_accounts_rounded,
+              label: "access_management".tr(),
+              color: AppColors.skyBlue,
+              onTap: _showUserManagementDialog,
+            ),
+          ),
+        if (_currentRole == DeviceRole.owner) const SizedBox(width: 10),
+        Expanded(
+          child: _buildSmallActionButton(
+            icon: Icons.alarm_rounded,
+            label: "alarm_settings".tr(),
+            color: AppColors.deepSea,
+            onTap: _showNotificationSettingsDialog,
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildSmallActionButton({required IconData icon, required String label, required Color color, required VoidCallback onTap}) {
+    return Container(
+      height: 85,
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(20),
+        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.04), blurRadius: 10, offset: const Offset(0, 4))],
+      ),
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(20),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(icon, color: color, size: 26),
+              const SizedBox(height: 8),
+              Text(label, textAlign: TextAlign.center, style: const TextStyle(color: AppColors.deepSea, fontWeight: FontWeight.w800, fontSize: 11)),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildStatusHeader(bool isReadOnly) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          colors: isReadOnly ? [Colors.orange.shade400, Colors.orange.shade700] : [AppColors.skyBlue, AppColors.deepSea],
+        ),
+        borderRadius: BorderRadius.circular(18),
+        boxShadow: [BoxShadow(color: (isReadOnly ? Colors.orange : AppColors.deepSea).withOpacity(0.2), blurRadius: 10, offset: const Offset(0, 4))],
+      ),
+      child: Row(
+        children: [
+          Icon(isReadOnly ? Icons.lock_person_rounded : Icons.tips_and_updates_outlined, color: Colors.white, size: 22),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Text(
+              isReadOnly ? "read_only_banner".tr() : "home_hint_text".tr(),
+              style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildCircularSelector(bool isReadOnly) {
+    return Center(
+      child: TweenAnimationBuilder(
+        tween: Tween<double>(begin: 0.85, end: 1.0),
+        duration: const Duration(milliseconds: 700),
+        curve: Curves.easeOutBack,
+        builder: (context, double value, child) => Transform.scale(
+          scale: value,
+          child: Container(
+            height: MediaQuery.of(context).size.width * 0.78,
+            width: MediaQuery.of(context).size.width * 0.78,
+            decoration: BoxDecoration(
+              color: Colors.white,
+              shape: BoxShape.circle,
+              boxShadow: [BoxShadow(color: AppColors.skyBlue.withOpacity(0.1), spreadRadius: 6, blurRadius: 25)],
+            ),
+            child: AbsorbPointer(
+              absorbing: isReadOnly,
+              child: Listener(
+                // Dokunulduğu AN çalışır (PointerUp beklemez), böylece gecikme olmaz
+                onPointerDown: (_) => _dismissHint(),
+                child: CircularSelector(
+                    key: _circularSelectorKey,
+                    sections: _sections,
+                    onUpdate: (i, d) {
+                      setState(() { _sections[i].addAll(d); _sections[i]['isActive'] = true; });
+                      _saveSectionConfig();
+                    }
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildBuzzerButton() {
+    return Center(
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(minWidth: 200),
+        child: SizedBox(
+          height: 52,
+          child: ElevatedButton.icon(
+            onPressed: _handleBuzzer,
+            style: ElevatedButton.styleFrom(
+              backgroundColor: _isRinging ? Colors.redAccent : Colors.white,
+              foregroundColor: _isRinging ? Colors.white : AppColors.deepSea,
+              elevation: 6,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+              padding: const EdgeInsets.symmetric(horizontal: 32),
+            ),
+            icon: Icon(_isRinging ? Icons.notifications_off_rounded : Icons.campaign_rounded, size: 24),
+            label: Text(_isRinging ? "stop_sound".tr() : "find_device".tr(), style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 14)),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildMedicineCard(int index, Map<String, dynamic> section, bool isReadOnly, ThemeData theme) {
+    final List<TimeOfDay> times = section['times'] as List<TimeOfDay>;
+    final bool isActive = section['isActive'];
+    times.sort((a, b) => (a.hour * 60 + a.minute).compareTo(b.hour * 60 + b.minute));
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(24),
+        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.03), blurRadius: 10, offset: const Offset(0, 4))],
+      ),
+      child: Theme(
+        data: theme.copyWith(dividerColor: Colors.transparent),
+        child: Material(
+          color: Colors.transparent,
+          clipBehavior: Clip.antiAlias,
+          borderRadius: BorderRadius.circular(24),
+          child: ExpansionTile(
+            shape: const RoundedRectangleBorder(borderRadius: BorderRadius.zero),
+            collapsedShape: const RoundedRectangleBorder(borderRadius: BorderRadius.zero),
+            tilePadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+            leading: Image.asset('assets/single_pill.png', width: 34, height: 34, errorBuilder: (c, e, s) => const Icon(Icons.medication)),
+            title: Text(section['name'], style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 17, color: AppColors.deepSea)),
+            subtitle: Text(isActive ? "${times.length} ${'times_a_day'.tr()}" : "passive".tr(), style: TextStyle(color: isActive ? AppColors.skyBlue : Colors.grey, fontSize: 13, fontWeight: FontWeight.w600)),
+            trailing: isReadOnly ? const Icon(Icons.lock, size: 18, color: Colors.grey) : Switch.adaptive(
+                value: isActive,
+                activeColor: AppColors.skyBlue,
+                onChanged: (v) {
+                  setState(() => _sections[index]['isActive'] = v);
+                  _saveSectionConfig();
+                }
+            ),
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
+                child: Column(
+                  children: [
+                    Container(height: 1, color: AppColors.skyBlue.withOpacity(0.1)),
+                    const SizedBox(height: 18),
+                    if (isActive) ...[
+                      Wrap(spacing: 8, runSpacing: 8, children: times.map((t) => _buildTimeChip(t)).toList()),
+                      const SizedBox(height: 20),
+                      if (!isReadOnly)
+                        SizedBox(
+                          width: double.infinity,
+                          child: TextButton.icon(
+                            onPressed: () => _circularSelectorKey.currentState?.showEditDialog(index),
+                            icon: const Icon(Icons.edit_calendar_rounded, size: 18),
+                            label: Text("edit_schedule".tr(), style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+                            style: TextButton.styleFrom(
+                                foregroundColor: AppColors.skyBlue,
+                                backgroundColor: AppColors.skyBlue.withOpacity(0.05),
+                                padding: const EdgeInsets.symmetric(vertical: 12),
+                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))
+                            ),
+                          ),
+                        ),
+                    ] else Text("passive_desc".tr(), style: const TextStyle(fontStyle: FontStyle.italic, color: Colors.grey, fontSize: 14)),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildTimeChip(TimeOfDay time) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      decoration: BoxDecoration(
+          color: AppColors.background,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: AppColors.skyBlue.withOpacity(0.15))
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Icon(Icons.access_time_filled_rounded, size: 16, color: AppColors.skyBlue),
+          const SizedBox(width: 8),
+          Text(time.format(context), style: const TextStyle(fontWeight: FontWeight.w900, color: AppColors.deepSea, fontSize: 15)),
+        ],
+      ),
+    );
+  }
+
+  // --- POP-UP DİYALOGLAR ---
+
+  void _showUserManagementDialog() {
+    final TextEditingController emailController = TextEditingController();
+    showGeneralDialog(
+      context: context,
+      barrierDismissible: true,
+      barrierLabel: '',
+      transitionDuration: const Duration(milliseconds: 300),
+      pageBuilder: (context, anim1, anim2) => const SizedBox(),
+      transitionBuilder: (context, anim1, anim2, child) => Transform.scale(
+        scale: Curves.easeOutBack.transform(anim1.value),
+        child: Opacity(
+          opacity: anim1.value,
+          child: AlertDialog(
+            insetPadding: const EdgeInsets.symmetric(horizontal: 15, vertical: 20),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(35)),
+            title: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text("access_management".tr(), style: const TextStyle(fontWeight: FontWeight.w900, color: AppColors.deepSea, fontSize: 18)),
+                IconButton(icon: const Icon(Icons.help_outline_rounded, color: AppColors.skyBlue), onPressed: () => _showInfoDialog("access_info_title".tr(), "access_info_desc".tr())),
+              ],
+            ),
+            content: SizedBox(
+              width: MediaQuery.of(context).size.width,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  TextField(
+                    controller: emailController,
+                    decoration: InputDecoration(
+                      hintText: "user_email_hint".tr(),
+                      prefixIcon: const Icon(Icons.email_outlined, size: 20),
+                      suffixIcon: IconButton(icon: const Icon(Icons.add_circle, color: AppColors.skyBlue, size: 30), onPressed: () {
+                        if (emailController.text.isNotEmpty) {
+                          _databaseService.addReadOnlyUser(widget.macAddress, emailController.text.trim());
+                          emailController.clear();
+                        }
+                      }),
+                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(20), borderSide: BorderSide.none),
+                      filled: true,
+                      fillColor: AppColors.background,
+                    ),
+                  ),
+                  const SizedBox(height: 20),
+                  const Divider(thickness: 0.5),
+                  ConstrainedBox(
+                    constraints: BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.4),
+                    child: StreamBuilder<DocumentSnapshot>(
+                      stream: FirebaseFirestore.instance.collection('dispenser').doc(widget.macAddress).snapshots(),
+                      builder: (context, snapshot) {
+                        if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
+                        final data = snapshot.data!.data() as Map<String, dynamic>;
+                        final readOnly = List<String>.from(data['read_only_mails'] ?? []);
+                        final secondary = List<String>.from(data['secondary_mails'] ?? []);
+                        return ListView(
+                          shrinkWrap: true,
+                          children: [
+                            ...readOnly.map((e) => _buildUserRow(e, "viewer".tr(), Icons.visibility, Colors.grey, () => _databaseService.promoteToSecondary(widget.macAddress, e))),
+                            ...secondary.map((e) => _buildUserRow(e, "admin".tr(), Icons.admin_panel_settings, AppColors.skyBlue, () => _databaseService.demoteToReadOnly(widget.macAddress, e))),
+                          ],
+                        );
+                      },
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            actions: [TextButton(onPressed: () => Navigator.pop(context), child: Text("close".tr(), style: const TextStyle(fontWeight: FontWeight.bold)))],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildUserRow(String email, String role, IconData icon, Color color, VoidCallback onSwap) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 8),
+      decoration: BoxDecoration(color: AppColors.background, borderRadius: BorderRadius.circular(15)),
+      child: ListTile(
+        leading: CircleAvatar(backgroundColor: color.withOpacity(0.1), radius: 18, child: Icon(icon, color: color, size: 18)),
+        title: Text(email, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+        subtitle: Text(role, style: TextStyle(color: color, fontSize: 12)),
+        trailing: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            IconButton(icon: const Icon(Icons.swap_horiz, color: Colors.blueAccent, size: 22), onPressed: onSwap),
+            IconButton(icon: const Icon(Icons.delete_outline, color: Colors.redAccent, size: 22), onPressed: () => _databaseService.removeUser(widget.macAddress, email)),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _showNotificationSettingsDialog() async {
+    final settings = await _notificationService.getNotificationSettings();
+    bool alarmsEnabled = settings['alarms_enabled'] ?? true;
+    bool notificationsEnabled = settings['notifications_enabled'] ?? true;
+    int offset = settings['offset'] ?? 10;
+
+    if (!mounted) return;
+
+    final List<int> offsetOptions = [0, 5, 10, 15, 30, 60];
+
+    showGeneralDialog(
+      context: context,
+      barrierDismissible: true,
+      barrierLabel: '',
+      transitionDuration: const Duration(milliseconds: 300),
+      pageBuilder: (context, anim1, anim2) => const SizedBox(),
+      transitionBuilder: (context, anim1, anim2, child) => Transform.scale(
+        scale: Curves.easeOutBack.transform(anim1.value),
+        child: Opacity(
+          opacity: anim1.value,
+          child: StatefulBuilder(
+            builder: (context, setSt) => AlertDialog(
+              insetPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(35)),
+              title: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text("alarm_settings".tr(), style: const TextStyle(fontWeight: FontWeight.w900, color: AppColors.deepSea, fontSize: 18)),
+                  IconButton(icon: const Icon(Icons.help_outline_rounded, color: AppColors.skyBlue), onPressed: () => _showInfoDialog("alarm_info_title".tr(), "alarm_settings_desc".tr())),
+                ],
+              ),
+              content: SizedBox(
+                // Genişlik sorunu olmaması için max width
+                width: MediaQuery.of(context).size.width,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    _buildSettingsCard(
+                      icon: Icons.alarm_on_rounded,
+                      title: "exact_alarm_title".tr(),
+                      subtitle: "exact_alarm_desc".tr(),
+                      trailing: Switch.adaptive(value: alarmsEnabled, activeColor: AppColors.skyBlue, onChanged: (v) => setSt(() => alarmsEnabled = v)),
+                    ),
+                    const Padding(padding: EdgeInsets.symmetric(vertical: 12), child: Divider(thickness: 0.5)),
+                    _buildSettingsCard(
+                      icon: Icons.notifications_active_outlined,
+                      title: "pre_notification_title".tr(),
+                      subtitle: "pre_notification_desc".tr(),
+                      trailing: Switch.adaptive(value: notificationsEnabled, activeColor: AppColors.skyBlue, onChanged: (v) => setSt(() => notificationsEnabled = v)),
+                    ),
+                    if (notificationsEnabled) ...[
+                      const SizedBox(height: 24),
+                      Text("notification_offset_label".tr(), style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: AppColors.deepSea)),
+                      const SizedBox(height: 12),
+
+                      // --- DÜZELTME: GRID LAYOUT (Hepsi Eşit Boyda) ---
+                      GridView.builder(
+                        shrinkWrap: true,
+                        physics: const NeverScrollableScrollPhysics(),
+                        gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                          crossAxisCount: 3, // Yan yana 3 tane
+                          crossAxisSpacing: 10,
+                          mainAxisSpacing: 10,
+                          childAspectRatio: 2.2, // Geniş ama eşit haplar
+                        ),
+                        itemCount: offsetOptions.length,
+                        itemBuilder: (context, index) {
+                          final val = offsetOptions[index];
+                          final isSelected = offset == val;
+                          return GestureDetector(
+                            onTap: () => setSt(() => offset = val),
+                            child: AnimatedContainer(
+                              duration: const Duration(milliseconds: 200),
+                              alignment: Alignment.center, // Ortala
+                              decoration: BoxDecoration(
+                                color: isSelected ? AppColors.skyBlue : Colors.white,
+                                borderRadius: BorderRadius.circular(12),
+                                border: Border.all(
+                                    color: isSelected ? AppColors.skyBlue : Colors.grey.shade300,
+                                    width: 1.5
+                                ),
+                                boxShadow: isSelected
+                                    ? [BoxShadow(color: AppColors.skyBlue.withOpacity(0.4), blurRadius: 6, offset: const Offset(0, 2))]
+                                    : [],
+                              ),
+                              child: Text(
+                                val == 0 ? "exact_time_label".tr() : "$val ${"minutes_unit".tr()}",
+                                textAlign: TextAlign.center,
+                                style: TextStyle(
+                                  color: isSelected ? Colors.white : AppColors.deepSea,
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 12, // Yazı sığması için biraz küçültüldü
+                                ),
+                              ),
+                            ),
+                          );
+                        },
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+              actions: [
+                TextButton(onPressed: () => Navigator.pop(context), child: Text("cancel".tr(), style: const TextStyle(color: Colors.grey))),
+                ElevatedButton(
+                  style: ElevatedButton.styleFrom(
+                      backgroundColor: AppColors.skyBlue,
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
+                      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 10)
+                  ),
+                  onPressed: () async {
+                    await _notificationService.saveNotificationSettings(alarmsEnabled: alarmsEnabled, notificationsEnabled: notificationsEnabled, offset: offset);
+                    if (mounted) {
+                      await _notificationService.scheduleMedicationNotifications(context, _sections);
+                      Navigator.pop(context);
+                      _showSuccessSnackbar();
+                    }
+                  },
+                  child: Text("save".tr(), style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSettingsCard({required IconData icon, required String title, required String subtitle, required Widget trailing}) {
+    return Row(
+      children: [
+        CircleAvatar(backgroundColor: AppColors.skyBlue.withOpacity(0.1), radius: 22, child: Icon(icon, color: AppColors.skyBlue, size: 22)),
+        const SizedBox(width: 14),
+        Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text(title, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: AppColors.deepSea)),
+          Text(subtitle, style: TextStyle(fontSize: 12, color: Colors.grey.shade600, height: 1.2)),
+        ])),
+        trailing,
+      ],
     );
   }
 }
