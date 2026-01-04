@@ -1,6 +1,6 @@
 import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:firebase_database/firebase_database.dart'; // RTDB
+import 'package:firebase_database/firebase_database.dart';
 import 'package:dispenserapp/services/auth_service.dart';
 import 'package:dispenserapp/services/notification_service.dart';
 import 'package:easy_localization/easy_localization.dart';
@@ -20,7 +20,8 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
-  final GlobalKey<CircularSelectorState> _circularSelectorKey = GlobalKey<CircularSelectorState>();
+  final GlobalKey<CircularSelectorState> _circularSelectorKey =
+  GlobalKey<CircularSelectorState>();
 
   final DatabaseService _databaseService = DatabaseService();
   final NotificationService _notificationService = NotificationService();
@@ -39,18 +40,23 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   StreamSubscription<DocumentSnapshot>? _firestoreSubscription;
   StreamSubscription<DatabaseEvent>? _rtdbSubscription;
 
+  // ✅ NEW: schedule debounce + signature
+  Timer? _scheduleDebounce;
+  String? _lastScheduleSignature;
+
   @override
   void initState() {
     super.initState();
-    _fadeController = AnimationController(vsync: this, duration: const Duration(milliseconds: 800));
+    _fadeController =
+        AnimationController(vsync: this, duration: const Duration(milliseconds: 800));
     _initData();
     _checkHintStatus();
-    // Bu senkronizasyon kritik!
     _startRTDBSyncListener();
   }
 
   @override
   void dispose() {
+    _scheduleDebounce?.cancel(); // ✅ NEW
     _firestoreSubscription?.cancel();
     _rtdbSubscription?.cancel();
     _fadeController.dispose();
@@ -68,70 +74,68 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
 
   void _dismissHint() {
     if (!_showHint) return;
-    setState(() => _showHint = false);
+    setState(() {
+      _showHint = false;
+    });
     SharedPreferences.getInstance().then((prefs) {
       prefs.setBool('has_seen_wheel_hint', true);
     });
   }
 
-  // --- KRİTİK DÜZELTME: GÜÇLÜ SENKRONİZASYON ---
-  // ESP32 -> RTDB -> FLUTTER -> FIRESTORE
+  // ✅ NEW: Sadece alarm schedule'ı etkileyen alanlardan imza üret
+  String _buildScheduleSignature(List<Map<String, dynamic>> sections) {
+    final sb = StringBuffer();
+    for (final s in sections) {
+      sb.write('|${s['name']}|${s['isActive']}|');
+
+      final times = (s['times'] as List<TimeOfDay>);
+      final sorted = [...times]
+        ..sort((a, b) => (a.hour * 60 + a.minute).compareTo(b.hour * 60 + b.minute));
+
+      for (final t in sorted) {
+        sb.write('${t.hour}:${t.minute},');
+      }
+    }
+    return sb.toString();
+  }
+
+  // --- RTDB -> FIRESTORE SENKRONİZASYON KÖPRÜSÜ ---
   void _startRTDBSyncListener() {
     String path = 'dispensers/${widget.macAddress}/config';
-    print("RTDB Dinleniyor: $path");
-
     _rtdbSubscription = _rtdbRef.child(path).onValue.listen((event) {
       final snapshotValue = event.snapshot.value;
-
       if (snapshotValue != null && snapshotValue is Map) {
-        // Gelen veriyi güvenli bir Map'e çevir
         Map<dynamic, dynamic> data = snapshotValue;
-
-        // Bölmeleri gez
         data.forEach((key, value) {
           if (value is Map && key.toString().startsWith("section_")) {
-            // Anahtar: section_0, section_1...
-            int index = int.tryParse(key.toString().replaceAll("section_", "")) ?? -1;
-
-            // Eğer geçerli bir bölme ve bizde o bölme varsa
+            int index =
+                int.tryParse(key.toString().replaceAll("section_", "")) ?? -1;
             if (index >= 0 && index < _sections.length) {
               int rtdbPillCount = -1;
-
-              // int olarak parse etmeyi dene
               if (value['pillCount'] is int) {
                 rtdbPillCount = value['pillCount'];
               } else if (value['pillCount'] is String) {
                 rtdbPillCount = int.tryParse(value['pillCount']) ?? -1;
               }
 
-              // Firestore'dan gelen (Ekranda gözüken) veri
               int currentAppPillCount = _sections[index]['pillCount'] ?? 0;
 
-              // EĞER FARK VARSA GÜNCELLE
               if (rtdbPillCount != -1 && rtdbPillCount != currentAppPillCount) {
-                print(">>> STOK FARKI TESPİT EDİLDİ! <<<");
-                print("Bölme $index: RTDB($rtdbPillCount) != App($currentAppPillCount)");
-                print("Firestore güncelleniyor...");
-
-                // 1. Ekranı hemen güncelle (Kullanıcı beklemesin)
                 if (mounted) {
                   setState(() {
                     _sections[index]['pillCount'] = rtdbPillCount;
                   });
                 }
-
-                // 2. Firestore'u arkada güncelle (Kalıcı olması için)
-                // Rol kontrolü: Sadece yetkili kişiler yazabilsin
-                if (_currentRole == DeviceRole.owner || _currentRole == DeviceRole.secondary) {
-                  _databaseService.updatePillCountOnly(widget.macAddress, index, rtdbPillCount);
+                if (_currentRole == DeviceRole.owner ||
+                    _currentRole == DeviceRole.secondary) {
+                  _databaseService.updatePillCountOnly(
+                      widget.macAddress, index, rtdbPillCount);
                 }
               }
             }
           }
         });
       }
-    }, onError: (e) {
-      print("RTDB Listener Error: $e");
     });
   }
 
@@ -141,10 +145,10 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
 
     final user = await _authService.getOrCreateUser();
     if (user != null) {
-      _currentRole = await _databaseService.getUserRole(widget.macAddress, user.email);
+      _currentRole =
+      await _databaseService.getUserRole(widget.macAddress, user.email);
     }
 
-    // Firestore Dinleyici (Ana Veri Kaynağı)
     _firestoreSubscription = FirebaseFirestore.instance
         .collection('dispenser')
         .doc(widget.macAddress)
@@ -164,31 +168,38 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
 
     if (!data.containsKey('section_config')) {
       if (mounted) {
+        final defaultSections = List.generate(3, (index) => {
+          'name': 'medicine_default_name'.tr(args: [(index + 1).toString()]),
+          'times': [const TimeOfDay(hour: 8, minute: 0)],
+          'isActive': true,
+          'pillCount': 0,
+        });
+
         setState(() {
           _deviceName = fetchedName;
-          _sections = List.generate(3, (index) => {
-            'name': 'medicine_default_name'.tr(args: [(index + 1).toString()]),
-            'times': [TimeOfDay(hour: (8 + 5 * index) % 24, minute: 0)],
-            'isActive': true,
-            'pillCount': 0,
-          });
+          _sections = defaultSections;
           _isLoading = false;
         });
         _fadeController.forward();
+
+        // ✅ NEW: default config için de schedule (ama debounce/signature ile)
+        _scheduleIfNeeded(defaultSections);
       }
       return;
     }
 
     final List<dynamic> configData = data['section_config'];
-
     final List<Map<String, dynamic>> newSections = configData.map((item) {
       final Map<String, dynamic> section = item as Map<String, dynamic>;
       List<TimeOfDay> times = [];
 
       if (section.containsKey('schedule')) {
-        times = (section['schedule'] as List).map((t) => TimeOfDay(hour: t['h'], minute: t['m'])).toList();
+        times = (section['schedule'] as List)
+            .map((t) => TimeOfDay(hour: t['h'], minute: t['m']))
+            .toList();
       } else if (section['isActive'] == true) {
-        times.add(TimeOfDay(hour: section['hour'] ?? 8, minute: section['minute'] ?? 0));
+        times.add(TimeOfDay(
+            hour: section['hour'] ?? 8, minute: section['minute'] ?? 0));
       }
 
       if (times.isEmpty && section['isActive'] == true) {
@@ -210,8 +221,26 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
         _isLoading = false;
       });
       _fadeController.forward();
-      _notificationService.scheduleMedicationNotifications(context, _sections, widget.macAddress);
+
+      // ✅ NEW: Her snapshot'ta stopAll yaptırma → sadece config değişince schedule et
+      _scheduleIfNeeded(newSections);
     }
+  }
+
+  // ✅ NEW: signature + debounce ile schedule
+  void _scheduleIfNeeded(List<Map<String, dynamic>> sections) {
+    final signature = _buildScheduleSignature(sections);
+
+    // pillCount gibi şeyler schedule'ı etkilememeli; signature zaten onları içermiyor.
+    if (signature == _lastScheduleSignature) return;
+    _lastScheduleSignature = signature;
+
+    _scheduleDebounce?.cancel();
+    _scheduleDebounce = Timer(const Duration(seconds: 2), () async {
+      if (!mounted) return;
+      await _notificationService.scheduleMedicationNotifications(
+          context, _sections, widget.macAddress);
+    });
   }
 
   Future<void> _saveSectionConfig() async {
@@ -230,6 +259,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     }).toList();
 
     await _databaseService.saveSectionConfig(widget.macAddress, serializableList);
+    // Not: Firestore snapshot zaten geleceği için scheduleIfNeeded oradan dönecek.
   }
 
   Future<void> _handleBuzzer() async {
@@ -252,7 +282,8 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     }
   }
 
-  bool _canEdit() => _currentRole == DeviceRole.owner || _currentRole == DeviceRole.secondary;
+  bool _canEdit() =>
+      _currentRole == DeviceRole.owner || _currentRole == DeviceRole.secondary;
 
   void _showSuccessSnackbar() {
     if (!mounted) return;
@@ -267,13 +298,21 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
             color: AppColors.deepSea.withOpacity(0.9),
             borderRadius: BorderRadius.circular(20),
             border: Border.all(color: Colors.white.withOpacity(0.1)),
-            boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.2), blurRadius: 10, offset: const Offset(0, 4))],
+            boxShadow: [
+              BoxShadow(
+                  color: Colors.black.withOpacity(0.2),
+                  blurRadius: 10,
+                  offset: const Offset(0, 4))
+            ],
           ),
           child: Row(
             children: [
-              const Icon(Icons.check_circle_rounded, color: AppColors.skyBlue, size: 22),
+              const Icon(Icons.check_circle_rounded,
+                  color: AppColors.skyBlue, size: 22),
               const SizedBox(width: 12),
-              Text("alarm_settings_saved".tr(), style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+              Text("alarm_settings_saved".tr(),
+                  style: const TextStyle(
+                      color: Colors.white, fontWeight: FontWeight.bold)),
             ],
           ),
         ),
@@ -290,11 +329,18 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
           children: [
             const Icon(Icons.info_outline_rounded, color: AppColors.skyBlue),
             const SizedBox(width: 10),
-            Text(title, style: const TextStyle(fontWeight: FontWeight.bold, color: AppColors.deepSea, fontSize: 18)),
+            Text(title,
+                style: const TextStyle(
+                    fontWeight: FontWeight.bold,
+                    color: AppColors.deepSea,
+                    fontSize: 18)),
           ],
         ),
-        content: Text(content, style: const TextStyle(height: 1.5, fontSize: 15)),
-        actions: [TextButton(onPressed: () => Navigator.pop(context), child: Text("close".tr()))],
+        content: Text(content,
+            style: const TextStyle(height: 1.5, fontSize: 15)),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context), child: Text("close".tr()))
+        ],
       ),
     );
   }
@@ -305,7 +351,9 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       context: context,
       builder: (context) => AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: Text("edit_device_name".tr(), style: const TextStyle(color: AppColors.deepSea, fontWeight: FontWeight.bold)),
+        title: Text("edit_device_name".tr(),
+            style: const TextStyle(
+                color: AppColors.deepSea, fontWeight: FontWeight.bold)),
         content: TextField(
           controller: controller,
           autofocus: true,
@@ -320,53 +368,18 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
             child: Text("cancel".tr(), style: const TextStyle(color: Colors.grey)),
           ),
           ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: AppColors.skyBlue, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))),
+            style: ElevatedButton.styleFrom(
+                backgroundColor: AppColors.skyBlue,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))),
             onPressed: () {
               if (controller.text.trim().isNotEmpty) {
-                _databaseService.updateDeviceName(widget.macAddress, controller.text.trim());
+                _databaseService.updateDeviceName(
+                    widget.macAddress, controller.text.trim());
               }
               Navigator.pop(context);
             },
             child: Text("save".tr(), style: const TextStyle(color: Colors.white)),
           ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildDeviceNameSection(bool isReadOnly) {
-    return Padding(
-      padding: const EdgeInsets.only(top: 20, bottom: 5),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Flexible(
-            child: Text(
-              _deviceName.isEmpty ? "loading".tr() : _deviceName,
-              style: const TextStyle(
-                fontSize: 22,
-                fontWeight: FontWeight.bold,
-                color: AppColors.deepSea,
-                letterSpacing: 0.5,
-              ),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-            ),
-          ),
-          if (!isReadOnly) ...[
-            const SizedBox(width: 8),
-            IconButton(
-              icon: const Icon(Icons.edit_rounded, color: AppColors.skyBlue, size: 20),
-              onPressed: _showEditNameDialog,
-              tooltip: "edit_name_tooltip".tr(),
-              constraints: const BoxConstraints(),
-              padding: const EdgeInsets.all(4),
-              style: IconButton.styleFrom(
-                backgroundColor: AppColors.skyBlue.withOpacity(0.1),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-              ),
-            ),
-          ]
         ],
       ),
     );
@@ -383,9 +396,10 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
         systemOverlayStyle: const SystemUiOverlayStyle(
           statusBarColor: Colors.transparent,
           statusBarIconBrightness: Brightness.dark,
-          statusBarBrightness: Brightness.light,
         ),
-        title: Text("device_settings_title".tr(), style: const TextStyle(fontWeight: FontWeight.w900, color: AppColors.deepSea)),
+        title: Text("device_settings_title".tr(),
+            style: const TextStyle(
+                fontWeight: FontWeight.w900, color: AppColors.deepSea)),
         centerTitle: true,
         backgroundColor: Colors.transparent,
         elevation: 0,
@@ -397,12 +411,12 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
         opacity: _fadeController,
         child: SingleChildScrollView(
           physics: const BouncingScrollPhysics(),
-          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+          padding:
+          const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
           child: Column(
             children: [
               _buildQuickActionButtons(),
               const SizedBox(height: 16),
-
               AnimatedSize(
                 duration: const Duration(milliseconds: 500),
                 curve: Curves.easeOutQuart,
@@ -415,22 +429,20 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                 )
                     : const SizedBox.shrink(),
               ),
-
               if (!_showHint) const SizedBox(height: 15),
-
               _buildCircularSelector(isReadOnly),
               _buildDeviceNameSection(isReadOnly),
-
               const SizedBox(height: 25),
-
               if (!isReadOnly) _buildBuzzerButton(),
               const SizedBox(height: 35),
-
               _buildSectionHeader(),
               const SizedBox(height: 15),
-
-              ..._sections.asMap().entries.map((e) => _buildMedicineCard(e.key, e.value, isReadOnly, theme)).toList(),
-
+              ..._sections
+                  .asMap()
+                  .entries
+                  .map((e) => _buildMedicineCard(
+                  e.key, e.value, isReadOnly, theme))
+                  .toList(),
               const SizedBox(height: 40),
             ],
           ),
@@ -444,10 +456,12 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       alignment: Alignment.centerLeft,
       child: Padding(
         padding: const EdgeInsets.only(left: 4),
-        child: Text(
-            "scheduled_meds_title",
-            style: const TextStyle(fontWeight: FontWeight.w900, color: AppColors.deepSea, fontSize: 17)
-        ).tr(),
+        child: Text("scheduled_meds_title",
+            style: const TextStyle(
+                fontWeight: FontWeight.w900,
+                color: AppColors.deepSea,
+                fontSize: 17))
+            .tr(),
       ),
     );
   }
@@ -465,7 +479,6 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
             ),
           ),
         if (_currentRole == DeviceRole.owner) const SizedBox(width: 10),
-
         Expanded(
           child: _buildSmallActionButton(
             icon: Icons.alarm_rounded,
@@ -478,13 +491,23 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     );
   }
 
-  Widget _buildSmallActionButton({required IconData icon, required String label, required Color color, required VoidCallback onTap}) {
+  Widget _buildSmallActionButton({
+    required IconData icon,
+    required String label,
+    required Color color,
+    required VoidCallback onTap,
+  }) {
     return Container(
       height: 85,
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(20),
-        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.04), blurRadius: 10, offset: const Offset(0, 4))],
+        boxShadow: [
+          BoxShadow(
+              color: Colors.black.withOpacity(0.04),
+              blurRadius: 10,
+              offset: const Offset(0, 4))
+        ],
       ),
       child: Material(
         color: Colors.transparent,
@@ -496,7 +519,12 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
             children: [
               Icon(icon, color: color, size: 26),
               const SizedBox(height: 8),
-              Text(label, textAlign: TextAlign.center, style: const TextStyle(color: AppColors.deepSea, fontWeight: FontWeight.w800, fontSize: 11)),
+              Text(label,
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                      color: AppColors.deepSea,
+                      fontWeight: FontWeight.w800,
+                      fontSize: 11)),
             ],
           ),
         ),
@@ -510,19 +538,29 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         gradient: LinearGradient(
-          colors: isReadOnly ? [Colors.orange.shade400, Colors.orange.shade700] : [AppColors.skyBlue, AppColors.deepSea],
+          colors: isReadOnly
+              ? [Colors.orange.shade400, Colors.orange.shade700]
+              : [AppColors.skyBlue, AppColors.deepSea],
         ),
         borderRadius: BorderRadius.circular(18),
-        boxShadow: [BoxShadow(color: (isReadOnly ? Colors.orange : AppColors.deepSea).withOpacity(0.2), blurRadius: 10, offset: const Offset(0, 4))],
+        boxShadow: [
+          BoxShadow(
+              color: (isReadOnly ? Colors.orange : AppColors.deepSea)
+                  .withOpacity(0.2),
+              blurRadius: 10,
+              offset: const Offset(0, 4))
+        ],
       ),
       child: Row(
         children: [
-          Icon(isReadOnly ? Icons.lock_person_rounded : Icons.tips_and_updates_outlined, color: Colors.white, size: 22),
+          Icon(isReadOnly ? Icons.lock_person_rounded : Icons.tips_and_updates_outlined,
+              color: Colors.white, size: 22),
           const SizedBox(width: 14),
           Expanded(
             child: Text(
               isReadOnly ? "read_only_banner".tr() : "home_hint_text".tr(),
-              style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13),
+              style: const TextStyle(
+                  color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13),
             ),
           ),
         ],
@@ -544,29 +582,70 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
             decoration: BoxDecoration(
               color: const Color(0xFFF5F7FA),
               shape: BoxShape.circle,
-              boxShadow: [BoxShadow(color: AppColors.skyBlue.withOpacity(0.1), spreadRadius: 6, blurRadius: 25)],
+              boxShadow: [
+                BoxShadow(
+                    color: AppColors.skyBlue.withOpacity(0.1),
+                    spreadRadius: 6,
+                    blurRadius: 25)
+              ],
             ),
             child: AbsorbPointer(
               absorbing: isReadOnly,
               child: Listener(
                 onPointerDown: (_) => _dismissHint(),
                 child: CircularSelector(
-                    key: _circularSelectorKey,
-                    sections: _sections,
-                    onUpdate: (i, d) {
-                      setState(() {
-                        _sections[i]['name'] = d['name'];
-                        _sections[i]['times'] = d['times'];
-                        _sections[i]['pillCount'] = d['pillCount'];
-                        _sections[i]['isActive'] = true;
-                      });
-                      _saveSectionConfig();
-                    }
+                  key: _circularSelectorKey,
+                  sections: _sections,
+                  onUpdate: (i, d) {
+                    setState(() {
+                      _sections[i]['name'] = d['name'];
+                      _sections[i]['times'] = d['times'];
+                      _sections[i]['pillCount'] = d['pillCount'];
+                      _sections[i]['isActive'] = true;
+                    });
+                    _saveSectionConfig();
+                  },
                 ),
               ),
             ),
           ),
         ),
+      ),
+    );
+  }
+
+  Widget _buildDeviceNameSection(bool isReadOnly) {
+    return Padding(
+      padding: const EdgeInsets.only(top: 20, bottom: 5),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Flexible(
+            child: Text(
+              _deviceName.isEmpty ? "loading".tr() : _deviceName,
+              style: const TextStyle(
+                  fontSize: 22,
+                  fontWeight: FontWeight.bold,
+                  color: AppColors.deepSea,
+                  letterSpacing: 0.5),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+          if (!isReadOnly) ...[
+            const SizedBox(width: 8),
+            IconButton(
+              icon: const Icon(Icons.edit_rounded,
+                  color: AppColors.skyBlue, size: 20),
+              onPressed: _showEditNameDialog,
+              style: IconButton.styleFrom(
+                backgroundColor: AppColors.skyBlue.withOpacity(0.1),
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(8)),
+              ),
+            ),
+          ]
+        ],
       ),
     );
   }
@@ -581,13 +660,19 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
             onPressed: _handleBuzzer,
             style: ElevatedButton.styleFrom(
               backgroundColor: _isRinging ? Colors.redAccent : Colors.white,
-              foregroundColor: _isRinging ? Colors.white : AppColors.deepSea,
+              foregroundColor:
+              _isRinging ? Colors.white : AppColors.deepSea,
               elevation: 6,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(16)),
               padding: const EdgeInsets.symmetric(horizontal: 32),
             ),
-            icon: Icon(_isRinging ? Icons.notifications_off_rounded : Icons.campaign_rounded, size: 24),
-            label: Text(_isRinging ? "stop_sound".tr() : "find_device".tr(), style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 14)),
+            icon: Icon(_isRinging
+                ? Icons.notifications_off_rounded
+                : Icons.campaign_rounded, size: 24),
+            label: Text(_isRinging ? "stop_sound".tr() : "find_device".tr(),
+                style: const TextStyle(
+                    fontWeight: FontWeight.w900, fontSize: 14)),
           ),
         ),
       ),
@@ -621,12 +706,10 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
           borderRadius: BorderRadius.circular(24),
           child: ExpansionTile(
             shape: const RoundedRectangleBorder(borderRadius: BorderRadius.zero),
-            collapsedShape: const RoundedRectangleBorder(borderRadius: BorderRadius.zero),
             tilePadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
             leading: Stack(
               children: [
                 Image.asset('assets/single_pill.png', width: 34, height: 34, errorBuilder: (c, e, s) => const Icon(Icons.medication)),
-
                 if(isActive)
                   Positioned(
                       right: 0, bottom: 0,
@@ -794,7 +877,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                 ],
               ),
             ),
-            actions: [TextButton(onPressed: () => Navigator.pop(context), child: Text("close".tr(), style: const TextStyle(fontWeight: FontWeight.bold)))],
+            actions: [TextButton(onPressed: () => Navigator.pop(context), child: Text("close".tr()))],
           ),
         ),
       ),
@@ -807,7 +890,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       decoration: BoxDecoration(color: AppColors.background, borderRadius: BorderRadius.circular(15)),
       child: ListTile(
         leading: CircleAvatar(backgroundColor: color.withOpacity(0.1), radius: 18, child: Icon(icon, color: color, size: 18)),
-        title: Text(email, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+        title: Text(email, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13), overflow: TextOverflow.ellipsis),
         subtitle: Text(role, style: TextStyle(color: color, fontSize: 12)),
         trailing: Row(
           mainAxisSize: MainAxisSize.min,
@@ -820,6 +903,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     );
   }
 
+  // --- ALARM AYARLARI DİYALOĞU (Release Düzeltmesi Eklendi) ---
   Future<void> _showNotificationSettingsDialog() async {
     final user = await _authService.getOrCreateUser();
     if (user == null) return;
@@ -828,12 +912,11 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     bool alarmsEnabled = settings['alarms_enabled'] ?? true;
     bool notificationsEnabled = settings['notifications_enabled'] ?? true;
     int offset = settings['offset'] ?? 10;
-
     bool feedbackEnabled = await _databaseService.getDeviceFeedbackPreference(user.uid, widget.macAddress);
 
-    if (!mounted) return;
-
     final List<int> offsetOptions = [0, 5, 10, 15, 30, 60];
+
+    if (!mounted) return;
 
     showGeneralDialog(
       context: context,
@@ -841,12 +924,12 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       barrierLabel: '',
       transitionDuration: const Duration(milliseconds: 300),
       pageBuilder: (context, anim1, anim2) => const SizedBox(),
-      transitionBuilder: (context, anim1, anim2, child) => Transform.scale(
+      transitionBuilder: (dialogContext, anim1, anim2, child) => Transform.scale(
         scale: Curves.easeOutBack.transform(anim1.value),
         child: Opacity(
           opacity: anim1.value,
           child: StatefulBuilder(
-            builder: (context, setSt) => AlertDialog(
+            builder: (stContext, setSt) => AlertDialog(
               insetPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(35)),
               title: Row(
@@ -856,8 +939,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                   IconButton(icon: const Icon(Icons.help_outline_rounded, color: AppColors.skyBlue), onPressed: () => _showInfoDialog("alarm_info_title".tr(), "alarm_settings_desc".tr())),
                 ],
               ),
-              content: SizedBox(
-                width: MediaQuery.of(context).size.width,
+              content: SingleChildScrollView(
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -876,18 +958,12 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                       trailing: Switch.adaptive(value: notificationsEnabled, activeColor: AppColors.skyBlue, onChanged: (v) => setSt(() => notificationsEnabled = v)),
                     ),
                     const Padding(padding: EdgeInsets.symmetric(vertical: 12), child: Divider(thickness: 0.5)),
-
                     _buildSettingsCard(
                       icon: Icons.feedback_outlined,
                       title: "responsive_feedback_title".tr(),
                       subtitle: feedbackEnabled ? "responsive_feedback_active".tr() : "responsive_feedback_inactive".tr(),
-                      trailing: Switch.adaptive(
-                          value: feedbackEnabled,
-                          activeColor: AppColors.skyBlue,
-                          onChanged: (v) => setSt(() => feedbackEnabled = v)
-                      ),
+                      trailing: Switch.adaptive(value: feedbackEnabled, activeColor: AppColors.skyBlue, onChanged: (v) => setSt(() => feedbackEnabled = v)),
                     ),
-
                     if (notificationsEnabled) ...[
                       const SizedBox(height: 24),
                       Text("notification_offset_label".tr(), style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: AppColors.deepSea)),
@@ -914,11 +990,9 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                                 color: isSelected ? AppColors.skyBlue : Colors.white,
                                 borderRadius: BorderRadius.circular(12),
                                 border: Border.all(color: isSelected ? AppColors.skyBlue : Colors.grey.shade300, width: 1.5),
-                                boxShadow: isSelected ? [BoxShadow(color: AppColors.skyBlue.withOpacity(0.4), blurRadius: 6, offset: const Offset(0, 2))] : [],
                               ),
                               child: Text(
                                 val == 0 ? "exact_time_label".tr() : "$val ${"minutes_unit".tr()}",
-                                textAlign: TextAlign.center,
                                 style: TextStyle(color: isSelected ? Colors.white : AppColors.deepSea, fontWeight: FontWeight.bold, fontSize: 12),
                               ),
                             ),
@@ -930,19 +1004,26 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                 ),
               ),
               actions: [
-                TextButton(onPressed: () => Navigator.pop(context), child: Text("cancel".tr(), style: const TextStyle(color: Colors.grey))),
+                TextButton(onPressed: () => Navigator.of(dialogContext).pop(), child: Text("cancel".tr())),
                 ElevatedButton(
-                  style: ElevatedButton.styleFrom(backgroundColor: AppColors.skyBlue, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)), padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 10)),
+                  style: ElevatedButton.styleFrom(backgroundColor: AppColors.skyBlue, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15))),
                   onPressed: () async {
-                    await _notificationService.saveNotificationSettings(alarmsEnabled: alarmsEnabled, notificationsEnabled: notificationsEnabled, offset: offset);
-                    await _databaseService.saveDevicePreference(user.uid, widget.macAddress, feedbackEnabled);
-                    final prefs = await SharedPreferences.getInstance();
-                    await prefs.setBool('feedback_enabled', feedbackEnabled);
+                    // Release Düzeltmesi: Önce diyaloğu kapat
+                    Navigator.of(dialogContext).pop();
 
-                    if (mounted) {
-                      await _notificationService.scheduleMedicationNotifications(context, _sections, widget.macAddress);
-                      Navigator.pop(context);
-                      _showSuccessSnackbar();
+                    try {
+                      await _notificationService.saveNotificationSettings(alarmsEnabled: alarmsEnabled, notificationsEnabled: notificationsEnabled, offset: offset);
+                      await _databaseService.saveDevicePreference(user.uid, widget.macAddress, feedbackEnabled);
+
+                      final prefs = await SharedPreferences.getInstance();
+                      await prefs.setBool('feedback_enabled', feedbackEnabled);
+
+                      if (mounted) {
+                        await _notificationService.scheduleMedicationNotifications(context, _sections, widget.macAddress);
+                        _showSuccessSnackbar();
+                      }
+                    } catch (e) {
+                      debugPrint("Save Error: $e");
                     }
                   },
                   child: Text("save".tr(), style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),

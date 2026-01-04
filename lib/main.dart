@@ -126,6 +126,9 @@ void main() async {
 
   await EasyLocalization.ensureInitialized();
 
+
+  await NotificationService.initializeNotifications();
+
   SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
     statusBarColor: Colors.transparent,
     statusBarIconBrightness: Brightness.dark,
@@ -140,6 +143,8 @@ void main() async {
     ),
   );
 }
+
+
 
 class MyApp extends StatefulWidget {
   const MyApp({super.key});
@@ -241,10 +246,15 @@ class _RootGateState extends State<RootGate> {
       // Cold start alarm kontrolü
       final alarms = await Alarm.getAlarms();
       for (var alarm in alarms) {
-        if (alarm.dateTime.isBefore(DateTime.now()) &&
-            alarm.dateTime.add(const Duration(minutes: 10)).isAfter(DateTime.now())) {
-          if (await Alarm.isRinging(alarm.id)) {
+        // Eğer alarm şu an çalıyorsa VEYA alarm zamanı geçtiyse ama durdurulmadıysa
+        if (alarm.dateTime.isBefore(DateTime.now())) {
+          // Alarm ID'sinin çalıp çalmadığını kontrol et
+          bool isRinging = await Alarm.isRinging(alarm.id);
+          if (isRinging) {
             globalAlarmState.value = alarm;
+            // Ekranın açılmasını native taraftan tekrar zorla
+            const platform = MethodChannel('com.example.dispenserapp/lock_control');
+            try { await platform.invokeMethod('showOnLockScreen'); } catch (_) {}
           }
         }
       }

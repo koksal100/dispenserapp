@@ -40,7 +40,7 @@ class NotificationService {
           enableVibration: true,
         )
       ],
-      debug: true,
+      debug: false,
     );
   }
 
@@ -49,14 +49,16 @@ class NotificationService {
     if (!isAllowed) {
       await AwesomeNotifications().requestPermissionToSendNotifications();
     }
+
     if (Platform.isAndroid) {
       await Permission.scheduleExactAlarm.request();
-      await Permission.systemAlertWindow.request();
+
       if (await Permission.notification.isDenied) {
         await Permission.notification.request();
       }
     }
   }
+
 
   Future<void> saveNotificationSettings({required bool alarmsEnabled, required bool notificationsEnabled, required int offset}) async {
     final prefs = await SharedPreferences.getInstance();

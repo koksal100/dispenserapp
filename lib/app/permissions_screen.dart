@@ -1,11 +1,12 @@
 import 'dart:io';
+import 'package:flutter/services.dart';
 import 'package:dispenserapp/app/login_screen.dart';
 import 'package:dispenserapp/main.dart';
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:permission_handler/permission_handler.dart';
-import 'package:shared_preferences/shared_preferences.dart'; // <--- EKLENDİ
+import 'package:shared_preferences/shared_preferences.dart';
 
 class PermissionsScreen extends StatefulWidget {
   const PermissionsScreen({super.key});
@@ -14,16 +15,21 @@ class PermissionsScreen extends StatefulWidget {
   State<PermissionsScreen> createState() => _PermissionsScreenState();
 }
 
-class _PermissionsScreenState extends State<PermissionsScreen> with TickerProviderStateMixin {
+class _PermissionsScreenState extends State<PermissionsScreen>
+    with TickerProviderStateMixin, WidgetsBindingObserver {
   late AnimationController _controller;
   late Animation<double> _fadeAnimation;
   late Animation<Offset> _slideAnimation;
 
   bool _isLoading = false;
+  static const _platform = MethodChannel('com.example.dispenserapp/permissions');
+  bool _needsRecheckOnResume = false;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
+
     _controller = AnimationController(
       duration: const Duration(milliseconds: 1000),
       vsync: this,
@@ -32,63 +38,186 @@ class _PermissionsScreenState extends State<PermissionsScreen> with TickerProvid
     _fadeAnimation = Tween<double>(begin: 0.0, end: 1.0).animate(
       CurvedAnimation(parent: _controller, curve: Curves.easeOut),
     );
-    _slideAnimation = Tween<Offset>(begin: const Offset(0, 0.2), end: Offset.zero).animate(
-      CurvedAnimation(parent: _controller, curve: Curves.easeOutCubic),
-    );
+    _slideAnimation =
+        Tween<Offset>(begin: const Offset(0, 0.2), end: Offset.zero).animate(
+          CurvedAnimation(parent: _controller, curve: Curves.easeOutCubic),
+        );
 
     _controller.forward();
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _controller.dispose();
     super.dispose();
   }
 
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed && _needsRecheckOnResume) {
+      _needsRecheckOnResume = false;
+      _recheckAndContinueIfOk();
+    }
+  }
+
   Future<void> _requestPermissions() async {
     setState(() => _isLoading = true);
-
     await Future.delayed(const Duration(milliseconds: 100));
 
-    if (Platform.isAndroid) {
-      await [
-        Permission.notification,
-        Permission.bluetoothScan,
-        Permission.bluetoothConnect,
-      ].request();
+    // 1) Normal izinler
+    await _requestStandardPermissions();
 
-      if (await Permission.scheduleExactAlarm.isDenied) {
-        await Permission.scheduleExactAlarm.request();
+    // 2) Android özel izinler
+    if (Platform.isAndroid) {
+      final ok = await _ensureAndroidSpecialPermissions();
+      if (!ok) {
+        setState(() => _isLoading = false);
+        return;
       }
-      if (await Permission.systemAlertWindow.isDenied) {
-        await Permission.systemAlertWindow.request();
+
+      // 3) KRİTİK: Pil optimizasyonu izni
+      final batteryOk = await _ensureBatteryOptimization();
+      if (!batteryOk) {
+        setState(() => _isLoading = false);
+        return;
       }
-    } else if (Platform.isIOS) {
-      await [Permission.notification, Permission.bluetooth].request();
     }
 
-    // --- DEĞİŞİKLİK BURADA ---
-    // Kullanıcının bu aşamayı geçtiğini kaydediyoruz.
+    await _completeOnboarding();
+  }
+
+  Future<void> _requestStandardPermissions() async {
+    await Permission.notification.request();
+    await Permission.bluetoothScan.request();
+    await Permission.bluetoothConnect.request();
+  }
+
+  Future<bool> _ensureAndroidSpecialPermissions() async {
+    // Exact alarm
+    final canExact =
+        await _platform.invokeMethod<bool>('canScheduleExactAlarms') ?? false;
+
+    if (!canExact) {
+      final go = await _showGoToSettingsDialog(
+        title: 'alarm_permission_title'.tr(),
+        message: 'alarm_permission_desc'.tr(),
+        button: 'open_settings'.tr(),
+      );
+      if (go) {
+        _needsRecheckOnResume = true;
+        await _platform.invokeMethod('openExactAlarmSettings');
+      }
+      return false;
+    }
+
+    // Full-screen intent
+    final canFsi =
+        await _platform.invokeMethod<bool>('canUseFullScreenIntent') ?? true;
+
+    if (!canFsi) {
+      final go = await _showGoToSettingsDialog(
+        title: 'fsi_permission_title'.tr(),
+        message: 'fsi_permission_desc'.tr(),
+        button: 'open_settings'.tr(),
+      );
+      if (go) {
+        _needsRecheckOnResume = true;
+        await _platform.invokeMethod('openFullScreenIntentSettings');
+      }
+      return false;
+    }
+
+    return true;
+  }
+
+  // KRİTİK YENİ FONKSİYON: Pil optimizasyonu
+  Future<bool> _ensureBatteryOptimization() async {
+    final isDisabled =
+        await _platform.invokeMethod<bool>('isBatteryOptimizationDisabled') ?? false;
+
+    if (!isDisabled) {
+      final go = await _showGoToSettingsDialog(
+        title: 'Pil Tasarrufu İzni',
+        message: 'Alarmların arka planda çalışması için pil optimizasyonunu kapatmanız gerekiyor. Bu, alarmların sistem tarafından kapatılmasını engelleyecek.',
+        button: 'Ayarları Aç',
+      );
+      if (go) {
+        _needsRecheckOnResume = true;
+        await _platform.invokeMethod('requestBatteryOptimization');
+      }
+      return false;
+    }
+
+    return true;
+  }
+
+  Future<void> _recheckAndContinueIfOk() async {
+    setState(() => _isLoading = true);
+
+    final ok1 = await _ensureAndroidSpecialPermissions();
+    if (!ok1) {
+      setState(() => _isLoading = false);
+      return;
+    }
+
+    final ok2 = await _ensureBatteryOptimization();
+    if (!ok2) {
+      setState(() => _isLoading = false);
+      return;
+    }
+
+    await _completeOnboarding();
+  }
+
+  Future<void> _completeOnboarding() async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool('onboarding_complete', true);
-    // -------------------------
 
-    if (mounted) {
-      Navigator.of(context).pushReplacement(
-        PageRouteBuilder(
-          pageBuilder: (context, animation, secondaryAnimation) => const LoginScreen(),
-          transitionsBuilder: (context, animation, secondaryAnimation, child) {
-            return FadeTransition(opacity: animation, child: child);
-          },
-          transitionDuration: const Duration(milliseconds: 600),
-        ),
-      );
-    }
+    if (!mounted) return;
+
+    Navigator.of(context).pushReplacement(
+      PageRouteBuilder(
+        pageBuilder: (context, animation, secondaryAnimation) =>
+        const LoginScreen(),
+        transitionsBuilder: (context, animation, secondaryAnimation, child) {
+          return FadeTransition(opacity: animation, child: child);
+        },
+        transitionDuration: const Duration(milliseconds: 600),
+      ),
+    );
+  }
+
+  Future<bool> _showGoToSettingsDialog({
+    required String title,
+    required String message,
+    required String button,
+  }) async {
+    if (!mounted) return false;
+
+    return await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => AlertDialog(
+        title: Text(title),
+        content: Text(message),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: Text('cancel'.tr()),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: Text(button),
+          ),
+        ],
+      ),
+    ) ??
+        false;
   }
 
   @override
   Widget build(BuildContext context) {
-    // ... (UI KODLARI AYNI KALIYOR)
     return Scaffold(
       backgroundColor: AppColors.background,
       body: SafeArea(
@@ -110,7 +239,8 @@ class _PermissionsScreenState extends State<PermissionsScreen> with TickerProvid
                           color: AppColors.skyBlue.withOpacity(0.1),
                           shape: BoxShape.circle,
                         ),
-                        child: const Icon(Icons.security_update_good_rounded, size: 60, color: AppColors.skyBlue),
+                        child: const Icon(Icons.security_update_good_rounded,
+                            size: 60, color: AppColors.skyBlue),
                       ),
                       const SizedBox(height: 30),
                       Text(
@@ -144,7 +274,9 @@ class _PermissionsScreenState extends State<PermissionsScreen> with TickerProvid
                   child: Padding(
                     padding: const EdgeInsets.only(bottom: 40.0),
                     child: _isLoading
-                        ? const Center(child: CircularProgressIndicator(color: AppColors.skyBlue))
+                        ? const Center(
+                        child: CircularProgressIndicator(
+                            color: AppColors.skyBlue))
                         : _PermissionButton(onTap: _requestPermissions),
                   ),
                 ),

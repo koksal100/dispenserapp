@@ -191,5 +191,10 @@
   "section_details_title": "Tray Details",
   "section_prefix": "Tray {}",
   "unknown_pill": "Unknown Pill",
-  "enable_feedback_hint": "You can enable this from device alarm settings."
+  "enable_feedback_hint": "You can enable this from device alarm settings.",
+  "alarm_permission_title": "Exact Alarm Permission",
+  "alarm_permission_desc": "To ring the alarm exactly at the medication time, please allow 'Alarms & Reminders' in settings.",
+  "fsi_permission_title": "Full Screen Notifications",
+  "fsi_permission_desc": "To show the alarm screen even when your screen is locked, please enable full-screen intent permission in settings.",
+  "open_settings": "Open Settings"
 }
