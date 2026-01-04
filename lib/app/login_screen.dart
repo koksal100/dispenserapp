@@ -176,7 +176,7 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
                     child: Padding(
                       padding: const EdgeInsets.only(bottom: 20.0),
                       child: Text(
-                        "MedTrack Security",
+                        "MedTrack v0.5",
                         style: GoogleFonts.inter(
                           fontSize: 12,
                           color: Colors.blueGrey.shade300,

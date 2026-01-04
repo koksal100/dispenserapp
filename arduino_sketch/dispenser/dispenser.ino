@@ -7,6 +7,7 @@
 #include <BLEUtils.h>
 #include <BLEServer.h>
 #include <BLE2902.h>
+#include <Preferences.h> // KALICI HAFIZA İÇİN
 
 // ==========================================
 // --- AYARLAR ---
@@ -18,8 +19,9 @@
 // DİKKAT: Flutter tarafındaki databaseURL ile burası AYNI olmalı
 #define DATABASE_URL "https://smartmedicinedispenser-default-rtdb.europe-west1.firebasedatabase.app"
 
-// --- VERİ KONTROL SIKLIĞI (2.5 SANİYE) ---
-#define FIREBASE_KONTROL_SURESI 2500
+// --- VERİ KONTROL SIKLIKLARI (MULTITASKING İÇİN) ---
+#define CONFIG_CHECK_INTERVAL 15000 // 15 Saniye (İlaç saatleri ve stok)
+#define BUZZER_CHECK_INTERVAL 2000  // 2 Saniye (Ses çalma emri)
 
 // --- NOTA FREKANSLARI ---
 #define NOTE_C5  523
@@ -62,6 +64,7 @@ FirebaseData fbdo;
 FirebaseAuth auth;
 FirebaseConfig config;
 String DEVICE_ID;
+Preferences preferences; // Kalıcı hafıza nesnesi
 
 const char* ntpServer = "pool.ntp.org";
 const long  gmtOffset_sec = 10800;
@@ -69,10 +72,14 @@ const int   daylightOffset_sec = 0;
 
 #define MAX_ALARM 10
 struct AlarmZamani { int saat = -1; int dakika = -1; bool verildi = false; };
-struct Bolme { bool aktif = false; int alarmSayisi = 0; AlarmZamani alarmlar[MAX_ALARM]; };
+// YENİ: pillCount (ilaç sayacı) eklendi
+struct Bolme { bool aktif = false; int alarmSayisi = 0; int pillCount = 0; AlarmZamani alarmlar[MAX_ALARM]; };
 Bolme bolmeler[3];
 
-unsigned long sonVeriKontrol = 0;
+// --- ZAMANLAYICILAR ---
+unsigned long lastConfigCheck = 0;
+unsigned long lastBuzzerCheck = 0;
+
 bool bleMode = false;
 
 // --- BAĞLANTI KONTROLÜ ---
@@ -99,8 +106,11 @@ volatile bool resetTriggered = false;
 
 // --- PROTOTİPLER ---
 void ayarlaMotor(AccelStepper &stepper);
-void verileriGetir();
-void buzzerKontrol();
+void verileriGetir(); // Config verileri (15 sn)
+void buzzerKontrol(); // Ses verisi (2 sn)
+void hafizadanYukle(); 
+void hafizayaKaydet(int bolmeIndex); 
+bool veriDegistiMi(int i, bool yeniAktif, int yeniCount, int yeniAlarmSayisi, int yeniSaatler[], int yeniDakikalar[]); // YENİ: Gereksiz yazmayı önler
 void saatKontrolu();
 void ilacVer(int motorNo);
 void sesCikar(int sureMs);
@@ -165,6 +175,10 @@ void setup() {
 
   ayarlaMotor(stepper1); ayarlaMotor(stepper2); ayarlaMotor(stepper3);
 
+  // --- HAFIZA BAŞLATMA ---
+  preferences.begin("meddata", false); // "meddata" namespace'i altında çalış
+  hafizadanYukle(); // Önce hafızadaki eski ayarları yükle (Offline çalışabilmek için)
+
   WiFi.mode(WIFI_STA);
   WiFi.setSleep(false);
   WiFi.persistent(true); 
@@ -191,12 +205,13 @@ void setup() {
   }
 
   if (WiFi.status() == WL_CONNECTED) {
-     Serial.println("\nBaslangic Baglantisi OK!");
+     Serial.println("\nBaslangic Baglantisi OK! (Online)");
      internetVarMi = true;
      sesCikar(1000);
      firebaseBaslat();
+     verileriGetir(); // İnternet varsa hemen güncel veriyi çek
   } else {
-    Serial.println("\nBaslangicta WiFi yok. BLE Moduna Geciliyor.");
+    Serial.println("\nBaslangicta WiFi yok. Offline Mod (Hafiza) veya BLE ile devam ediliyor.");
     baslatBLE();
   }
 }
@@ -215,7 +230,7 @@ void loop() {
 
   if (bleMode && !deviceConnected) {
       if (millis() - lastBleBeepTime > 2000) {
-          sesCikar(100);
+          sesCikar(50);
           lastBleBeepTime = millis();
       }
   }
@@ -236,6 +251,7 @@ void loop() {
                   durdurBLE();
                   delay(500);
                   firebaseBaslat();
+                  verileriGetir(); // Bağlantı gelir gelmez güncelle
               }
           }
       }
@@ -245,7 +261,7 @@ void loop() {
       if (internetVarMi) {
           if (wifiKopmaZamani == 0) wifiKopmaZamani = millis();
           if (millis() - wifiKopmaZamani > 5000) {
-              Serial.println("!!! Internet Koptu !!!");
+              Serial.println("!!! Internet Koptu (Offline Mod Devrede) !!!");
               internetVarMi = false;
               if (!bleMode) { baslatBLE(); }
           }
@@ -254,24 +270,70 @@ void loop() {
       }
   }
 
-  if (internetVarMi) {
-      unsigned long simdikiZaman = millis();
-      if (simdikiZaman - sonVeriKontrol > FIREBASE_KONTROL_SURESI) {
-        if (Firebase.ready()) {
-           verileriGetir();
-           buzzerKontrol();
-        }
-        sonVeriKontrol = simdikiZaman;
+  // --- MULTITASKING (Eş Zamanlı Görevler) ---
+  if (internetVarMi && Firebase.ready()) {
+      unsigned long currentMillis = millis();
+
+      // Görev 1: Config Verilerini Çek (15 Saniye)
+      if (currentMillis - lastConfigCheck > CONFIG_CHECK_INTERVAL) {
+        verileriGetir();
+        lastConfigCheck = currentMillis;
       }
-      saatKontrolu();
+
+      // Görev 2: Buzzer Kontrolü (2 Saniye)
+      if (currentMillis - lastBuzzerCheck > BUZZER_CHECK_INTERVAL) {
+        buzzerKontrol();
+        lastBuzzerCheck = currentMillis;
+      }
   }
-  else {
-      if (credentialsReceived) {
-         Serial.println("BLE'den yeni sifre geldi...");
-         wifiBaglan(receivedSSID, receivedPassword);
-         credentialsReceived = false;
-      }
-      delay(10);
+
+  // Saat kontrolü internet olsun olmasın çalışır (RTC/Internal Clock)
+  saatKontrolu();
+  
+  // BLE şifre kontrolü
+  if (!internetVarMi && credentialsReceived) {
+      Serial.println("BLE'den yeni sifre geldi...");
+      wifiBaglan(receivedSSID, receivedPassword);
+      credentialsReceived = false;
+  }
+}
+
+// ==========================================================
+// --- YENİ: HAFIZA YÖNETİMİ ---
+// ==========================================================
+
+void hafizayaKaydet(int i) {
+  // Namespace: meddata
+  String p = "b" + String(i);
+  
+  preferences.putBool((p + "_akt").c_str(), bolmeler[i].aktif);
+  preferences.putInt((p + "_cnt").c_str(), bolmeler[i].pillCount);
+  preferences.putInt((p + "_len").c_str(), bolmeler[i].alarmSayisi);
+  
+  for(int k=0; k < bolmeler[i].alarmSayisi; k++) {
+    String a = p + "_a" + String(k);
+    preferences.putInt((a + "_h").c_str(), bolmeler[i].alarmlar[k].saat);
+    preferences.putInt((a + "_m").c_str(), bolmeler[i].alarmlar[k].dakika);
+  }
+}
+
+void hafizadanYukle() {
+  Serial.println("Hafizadan veri okunuyor...");
+  for(int i=0; i<3; i++) {
+    String p = "b" + String(i);
+    // Varsayılan değerler ikinci parametredir
+    bolmeler[i].aktif = preferences.getBool((p + "_akt").c_str(), false);
+    bolmeler[i].pillCount = preferences.getInt((p + "_cnt").c_str(), 0);
+    bolmeler[i].alarmSayisi = preferences.getInt((p + "_len").c_str(), 0);
+    
+    if(bolmeler[i].alarmSayisi > MAX_ALARM) bolmeler[i].alarmSayisi = MAX_ALARM;
+    
+    for(int k=0; k < bolmeler[i].alarmSayisi; k++) {
+      String a = p + "_a" + String(k);
+      bolmeler[i].alarmlar[k].saat = preferences.getInt((a + "_h").c_str(), -1);
+      bolmeler[i].alarmlar[k].dakika = preferences.getInt((a + "_m").c_str(), -1);
+      bolmeler[i].alarmlar[k].verildi = false; 
+    }
   }
 }
 
@@ -308,7 +370,6 @@ void baslatBLE() {
   Serial.println("BLE Yayini Basladi");
 }
 
-// --- DÜZELTİLMİŞ WIFI BAĞLAN FONKSİYONU ---
 void wifiBaglan(String ssid, String pass) {
   Serial.print("Yeni Ag Deneniyor: "); Serial.println(ssid);
   
@@ -317,20 +378,16 @@ void wifiBaglan(String ssid, String pass) {
       pCharacteristic->notify();
   }
 
-  // >>> HATA ÇÖZÜMÜ BURADA: <<<
-  // Eski bağlantı denemesini veya mevcut bağlantıyı tamamen durduruyoruz.
-  // Bu işlem "sta is connecting, cannot set config" hatasını engeller.
-  WiFi.disconnect(true);  // Bağlantıyı kes ve eski config'i temizle
-  delay(1000);            // Driver'ın kendine gelmesi için bekle
-  WiFi.mode(WIFI_OFF);    // WiFi'ı kapat
+  WiFi.disconnect(true);
+  delay(1000);
+  WiFi.mode(WIFI_OFF);
   delay(100);
-  WiFi.mode(WIFI_STA);    // WiFi'ı tekrar Station modunda aç
+  WiFi.mode(WIFI_STA);
   delay(500);
 
   WiFi.begin(ssid.c_str(), pass.c_str());
 
   int count = 0;
-  // Bekleme süresini biraz artırdık (40 * 500ms = 20 sn)
   while (WiFi.status() != WL_CONNECTED && count < 40) {
     delay(500); Serial.print("."); count++;
   }
@@ -344,7 +401,6 @@ void wifiBaglan(String ssid, String pass) {
        Serial.println("Telefona SUCCESS gonderiliyor...");
        pCharacteristic->setValue("SUCCESS");
        pCharacteristic->notify();
-       // Mesajın gitmesi için biraz bekle
        delay(2000); 
     }
     
@@ -390,7 +446,8 @@ void fabrikaAyarlarinaDon() {
     Serial.println("\n!!! RESET ISLEMI BASLATILDI !!!");
     sesCikar(100); delay(100); sesCikar(100); delay(100); sesCikar(100);
     
-    Serial.println("WiFi Hafizasi Siliniyor...");
+    Serial.println("Hafiza ve WiFi Siliniyor...");
+    preferences.clear(); // Kalıcı hafızayı temizle
     WiFi.disconnect(true, true); 
     
     delay(1000);
@@ -400,6 +457,21 @@ void fabrikaAyarlarinaDon() {
     ESP.restart();
 }
 
+// --- BUZZER KONTROLÜ (2 Saniyede Bir Çalışır) ---
+void buzzerKontrol() {
+  String path = "/dispensers/" + DEVICE_ID + "/buzzer";
+  // getBool veriyi daha hızlı çeker ve daha az veri harcar
+  if (Firebase.RTDB.getBool(&fbdo, path)) {
+    if (fbdo.boolData()) {
+        Serial.println("\n>>> 🔔 MELODİ: Buzzer Tetiklendi! <<<");
+        playMelody(); 
+        // Sesi çaldıktan sonra Firebase'deki değeri false yapıyoruz ki sürekli çalmasın
+        Firebase.RTDB.setBool(&fbdo, path, false);
+    }
+  }
+}
+
+// --- CONFİG VERİLERİ (15 Saniyede Bir Çalışır) ---
 void verileriGetir() {
   String path = "/dispensers/" + DEVICE_ID + "/config";
   
@@ -411,48 +483,82 @@ void verileriGetir() {
       json->get(result, sectionKey);
       if (result.success) {
         FirebaseJson sectionJson; result.getJSON(sectionJson);
+        
+        // Geçici Değişkenler (Kıyaslama için)
+        bool yeniAktif = false;
+        int yeniCount = 0;
+        int yeniAlarmSayisi = 0;
+        int yeniSaatler[MAX_ALARM];
+        int yeniDakikalar[MAX_ALARM];
+
+        // Verileri Oku
         FirebaseJsonData d_aktif; sectionJson.get(d_aktif, "isActive");
-        if(d_aktif.success) bolmeler[i].aktif = d_aktif.boolValue;
+        if(d_aktif.success) yeniAktif = d_aktif.boolValue;
+
+        FirebaseJsonData d_count; sectionJson.get(d_count, "pillCount");
+        if(d_count.success) yeniCount = d_count.intValue;
+
         FirebaseJsonData d_schedule; sectionJson.get(d_schedule, "schedule");
         if (d_schedule.success && d_schedule.type == "array") {
           FirebaseJsonArray myArr; myArr.setJsonArrayData(d_schedule.to<String>());
-          bolmeler[i].alarmSayisi = myArr.size();
-          if(bolmeler[i].alarmSayisi > MAX_ALARM) bolmeler[i].alarmSayisi = MAX_ALARM;
-          for (size_t k = 0; k < bolmeler[i].alarmSayisi; k++) {
+          yeniAlarmSayisi = myArr.size();
+          if(yeniAlarmSayisi > MAX_ALARM) yeniAlarmSayisi = MAX_ALARM;
+          for (size_t k = 0; k < yeniAlarmSayisi; k++) {
             FirebaseJsonData timeData; myArr.get(timeData, k);
             FirebaseJson timeObj; timeData.getJSON(timeObj);
             FirebaseJsonData h, m; timeObj.get(h, "h"); timeObj.get(m, "m");
-            if (h.success && m.success) {
-               if(bolmeler[i].alarmlar[k].saat != h.intValue || bolmeler[i].alarmlar[k].dakika != m.intValue) {
-                  Serial.printf("\n[GUNCELLEME] Bolme %d icin yeni alarm: %02d:%02d\n", i+1, h.intValue, m.intValue);
-                  bolmeler[i].alarmlar[k].saat = h.intValue; bolmeler[i].alarmlar[k].dakika = m.intValue;
-                  bolmeler[i].alarmlar[k].verildi = false;
-               }
-            }
+            yeniSaatler[k] = h.intValue;
+            yeniDakikalar[k] = m.intValue;
           }
-        } else { bolmeler[i].alarmSayisi = 0; }
+        } else { yeniAlarmSayisi = 0; }
+
+        // --- ÖNEMLİ: DEĞİŞİKLİK KONTROLÜ ---
+        // Sadece veri gerçekten değiştiyse hafızaya yaz (ESP32 ömrünü korur)
+        if (veriDegistiMi(i, yeniAktif, yeniCount, yeniAlarmSayisi, yeniSaatler, yeniDakikalar)) {
+           Serial.printf("\n[GUNCELLEME] Bolme %d degisti. Hafizaya yaziliyor...\n", i+1);
+           
+           bolmeler[i].aktif = yeniAktif;
+           bolmeler[i].pillCount = yeniCount;
+           bolmeler[i].alarmSayisi = yeniAlarmSayisi;
+           
+           for(int k=0; k < yeniAlarmSayisi; k++) {
+              // Saat değiştiyse "verildi" bilgisini sıfırla
+              if(bolmeler[i].alarmlar[k].saat != yeniSaatler[k] || bolmeler[i].alarmlar[k].dakika != yeniDakikalar[k]) {
+                 bolmeler[i].alarmlar[k].verildi = false;
+              }
+              bolmeler[i].alarmlar[k].saat = yeniSaatler[k];
+              bolmeler[i].alarmlar[k].dakika = yeniDakikalar[k];
+           }
+           hafizayaKaydet(i);
+        }
       }
     }
+    Serial.println("Veriler senkronize edildi.");
   } else {
-     if (String(fbdo.errorReason()).indexOf("timed out") == -1) {
-         Serial.print("Hata: ");
-         Serial.println(fbdo.errorReason());
-     }
+      if (String(fbdo.errorReason()).indexOf("timed out") == -1) {
+          Serial.print("Hata: ");
+          Serial.println(fbdo.errorReason());
+      }
   }
 }
 
-void buzzerKontrol() {
-  String path = "/dispensers/" + DEVICE_ID + "/buzzer";
-  if (Firebase.RTDB.getBool(&fbdo, path)) {
-    if (fbdo.boolData()) {
-        Serial.println("\n>>> 🔔 MELODİ: Buzzer Tetiklendi! <<<");
-        playMelody(); 
+// Yardımcı Fonksiyon: Veri değişti mi?
+bool veriDegistiMi(int i, bool yeniAktif, int yeniCount, int yeniAlarmSayisi, int yeniSaatler[], int yeniDakikalar[]) {
+    if (bolmeler[i].aktif != yeniAktif) return true;
+    if (bolmeler[i].pillCount != yeniCount) return true;
+    if (bolmeler[i].alarmSayisi != yeniAlarmSayisi) return true;
+    
+    for(int k=0; k < yeniAlarmSayisi; k++) {
+        if (bolmeler[i].alarmlar[k].saat != yeniSaatler[k]) return true;
+        if (bolmeler[i].alarmlar[k].dakika != yeniDakikalar[k]) return true;
     }
-  }
+    return false;
 }
 
 void saatKontrolu() {
   struct tm timeinfo;
+  // Offline modda eğer cihaz kapanıp açıldıysa saat yanlış olabilir.
+  // Ancak cihaz çalışır durumdayken internet koparsa internal clock (millis tabanlı) devam eder.
   if (!getLocalTime(&timeinfo)) return;
   int sa = timeinfo.tm_hour; int dk = timeinfo.tm_min; int sn = timeinfo.tm_sec;
 
@@ -484,12 +590,41 @@ void saatKontrolu() {
 }
 
 void ilacVer(int motorNo) {
+  int idx = motorNo - 1;
+
+  // 1. Motoru Hareket Ettir
   AccelStepper *motor;
   if (motorNo == 1) motor = &stepper1; else if (motorNo == 2) motor = &stepper2; else motor = &stepper3;
   motor->enableOutputs(); sesCikar(500);
   motor->move(ADIM_90_DERECE);
   while (motor->distanceToGo() != 0) motor->run();
   motor->disableOutputs(); sesCikar(1000);
+
+  // 2. İlaç Sayacını Düşür
+  if (bolmeler[idx].pillCount > 0) {
+    bolmeler[idx].pillCount--;
+    Serial.printf("Bolme %d kalan ilac: %d\n", motorNo, bolmeler[idx].pillCount);
+  } else {
+    Serial.printf("Bolme %d sayaci zaten 0!\n", motorNo);
+  }
+
+  // 3. Güncel Durumu Hafızaya Kaydet (Offline için kritik)
+  hafizayaKaydet(idx);
+
+  // 4. İnternet varsa Firebase'i Güncelle ve Logla
+  if (internetVarMi && Firebase.ready()) {
+    // Sayacı güncelle
+    String path = "/dispensers/" + DEVICE_ID + "/config/section_" + String(idx) + "/pillCount";
+    Firebase.RTDB.setInt(&fbdo, path, bolmeler[idx].pillCount);
+    
+    // Log at
+    String logPath = "/dispensers/" + DEVICE_ID + "/logs";
+    FirebaseJson logJson;
+    logJson.set("type", "auto_dispense");
+    logJson.set("section", idx);
+    logJson.set("timestamp", (int)time(NULL)); // UNIX timestamp
+    Firebase.RTDB.pushJSON(&fbdo, logPath, &logJson);
+  }
 }
 
 void playTone(int frequency, int durationMs) {

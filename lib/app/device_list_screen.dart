@@ -42,11 +42,17 @@ class _DeviceListScreenState extends State<DeviceListScreen> {
   }
 
   Future<AppUser?> _initialize() async {
-    final results = await Future.wait([
-      _authService.getOrCreateUser(),
-      precacheImage(const AssetImage('assets/dispenser_icon.png'), context),
-    ]);
-    return results[0] as AppUser?;
+    final user = await _authService.getOrCreateUser();
+
+    // --- YENİ EKLENEN KISIM: SENKRONİZASYON ---
+    // Eğer kullanıcı giriş yapmışsa, veritabanını tara ve listeyi güncelle.
+    // Bu sayede başkası sizi eklediyse bile ana ekranda görünür.
+    if (user != null && user.email != null) {
+      await _dbService.updateUserDeviceList(user.uid, user.email!);
+    }
+
+    await precacheImage(const AssetImage('assets/dispenser_icon.png'), context);
+    return user;
   }
 
   void _retryLogin() {
@@ -322,7 +328,7 @@ class _DeviceListScreenState extends State<DeviceListScreen> {
               child: ListView(
                 padding: const EdgeInsets.only(top: 20.0, bottom: 80, left: 16, right: 16),
                 children: [
-                  // --- BİLGİ KARTI (MODERN MAVİ TASARIM) ---
+                  // --- BİLGİ KARTI ---
                   AnimatedCrossFade(
                     duration: const Duration(milliseconds: 300),
                     crossFadeState: widget.isDragMode ? CrossFadeState.showFirst : CrossFadeState.showSecond,
@@ -429,13 +435,11 @@ class _DeviceListScreenState extends State<DeviceListScreen> {
               child: const Icon(Icons.folder_open_rounded, color: Color(0xFF0F5191), size: 24),
             ),
 
-            // --- GÜNCELLEME BURADA ---
-            // Başlık fontu 15'ten 18'e çıkarıldı (Dışarıdaki cihazlarla birebir aynı oldu)
             title: Text(
                 groupName,
                 style: const TextStyle(
                     fontWeight: FontWeight.w700,
-                    fontSize: 18, // GÜNCELLENDİ
+                    fontSize: 18,
                     color: Color(0xFF0F5191) // Derin Deniz Mavisi
                 )
             ),
@@ -563,7 +567,6 @@ class _DeviceListScreenState extends State<DeviceListScreen> {
     );
   }
 
-// --- MODERN & MARKALI CİHAZ KARTI UI (HİZALAMA VE BOYUT DÜZELTİLDİ) ---
   Widget _buildDeviceCardUI(String uid, String macAddress, String role,
       {required bool isInsideGroup, required bool interactive, required VoidCallback onLongPress}) {
     return StreamBuilder<DocumentSnapshot>(
@@ -639,11 +642,9 @@ class _DeviceListScreenState extends State<DeviceListScreen> {
                 padding: EdgeInsets.all(isInsideGroup ? 10.0 : 12.0),
                 child: Row(
                   children: [
-                    // --- GÜNCELLENEN RESİM ALANI (Border ve Renk Kaldırıldı) ---
                     Container(
                       width: imageSize,
                       height: imageSize * 1.5, // 400x600 oranı
-                      // Decoration (Arka plan ve Border) tamamen kaldırıldı
                       alignment: Alignment.center, // Görseli ortala
                       child: Image.asset(
                         'assets/dispenser_icon.png',
